@@ -21,6 +21,11 @@ export default function Home() {
     test_set: ''
   });
   const [showFixedFields, setShowFixedFields] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [selectedTemplates, setSelectedTemplates] = useState([]);
+  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', stepsText: '' });
+  const [addingTemplate, setAddingTemplate] = useState(false);
   const [templateBase64, setTemplateBase64] = useState(null);
   const [language, setLanguage] = useState('hu');
   const [result, setResult] = useState(null);
@@ -72,7 +77,7 @@ export default function Home() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specText, language })
+        body: JSON.stringify({ specText, language, stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)) })
       });
       const data = await res.json();
       clearInterval(interval);
@@ -96,6 +101,37 @@ export default function Home() {
 
   const updateField = (id, field, value) => {
     setTestCases(prev => prev.map(tc => tc.id === id ? { ...tc, [field]: value } : tc));
+  };
+
+  const saveTemplate = async () => {
+    if (!newTemplate.name || !newTemplate.stepsText) return;
+    const steps = newTemplate.stepsText
+      .split('\n')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => ({ action: s, expected: '' }));
+
+    const res = await fetch('/api/templates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newTemplate.name, description: newTemplate.description, steps })
+    });
+    const data = await res.json();
+    if (!data.error) {
+      setTemplates(prev => [data, ...prev]);
+      setNewTemplate({ name: '', description: '', stepsText: '' });
+      setAddingTemplate(false);
+    }
+  };
+
+  const deleteTemplate = async (id) => {
+    await fetch(`/api/templates?id=${id}`, { method: 'DELETE' });
+    setTemplates(prev => prev.filter(t => t.id !== id));
+    setSelectedTemplates(prev => prev.filter(i => i !== id));
+  };
+
+  const toggleTemplate = (id) => {
+    setSelectedTemplates(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
   const exportXLS = async () => {
@@ -241,6 +277,20 @@ export default function Home() {
         .field-group label { font-size: 11px; color: var(--muted); display: block; margin-bottom: .3rem; font-weight: 500; letter-spacing: .5px; text-transform: uppercase; }
         .field-group input, .field-group select { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; }
         .field-group input:focus, .field-group select:focus { outline: none; border-color: var(--accent); }
+        .template-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: .875rem 1rem; cursor: pointer; transition: all .15s; }
+        .template-card:hover { border-color: var(--accent); }
+        .template-card.selected { border-color: var(--accent); background: var(--accent-bg); }
+        .template-steps { font-size: 12px; color: var(--muted); margin-top: .4rem; line-height: 1.6; }
+        .template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-top: .75rem; }
+        .new-template-form { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-top: .75rem; display: flex; flex-direction: column; gap: .75rem; }
+        .new-template-form input, .new-template-form textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; width: 100%; }
+        .new-template-form input:focus, .new-template-form textarea:focus { outline: none; border-color: var(--accent); }
+        .new-template-form textarea { height: 100px; resize: vertical; }
+        .form-btns { display: flex; gap: 8px; justify-content: flex-end; }
+        .btn-save { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 7px 16px; font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; font-weight: 500; }
+        .btn-cancel { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 7px 16px; font-size: 13px; color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif; }
+        .delete-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 2px 6px; border-radius: 4px; }
+        .delete-btn:hover { color: var(--red); }
         .toggle-link { font-size: 12px; color: var(--accent-light); cursor: pointer; background: none; border: none; font-family: 'Inter', sans-serif; padding: 0; }
         .export-bar { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem 1.5rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; position: sticky; bottom: 1.5rem; }
         .export-bar-left { font-size: 14px; color: var(--muted); }
@@ -311,6 +361,65 @@ export default function Home() {
                 <span>.xlsx, .xls – ha nincs sablon, alapértelmezett formátumot használunk</span>
               </div>
             </div>
+
+            {isSignedIn && (
+              <div className="card">
+                <div className="card-title">
+                  <i className="ti ti-books" /> Lépés könyvtár
+                  <span style={{marginLeft:'auto',display:'flex',gap:'8px'}}>
+                    {templates.length > 0 && <button className="toggle-link" onClick={() => setShowTemplates(!showTemplates)}>{showTemplates ? 'Elrejtés ▲' : `Megjelenítés (${templates.length}) ▼`}</button>}
+                    <button className="toggle-link" onClick={() => setAddingTemplate(!addingTemplate)}>+ Új sablon</button>
+                  </span>
+                </div>
+                <p style={{fontSize:'13px',color:'var(--muted)',lineHeight:'1.6'}}>
+                  Add meg az ismétlődő navigációs és UI lépéseket. A generálás során ezeket a sablonokat felhasználjuk a tesztesetek összeállításához.
+                </p>
+                {addingTemplate && (
+                  <div className="new-template-form">
+                    <input
+                      placeholder="Sablon neve (pl. MERACE bejelentkezés)"
+                      value={newTemplate.name}
+                      onChange={e => setNewTemplate(p => ({...p, name: e.target.value}))}
+                    />
+                    <input
+                      placeholder="Leírás (opcionális)"
+                      value={newTemplate.description}
+                      onChange={e => setNewTemplate(p => ({...p, description: e.target.value}))}
+                    />
+                    <textarea
+                      placeholder={"Lépések – soronként egy lépés:\nA felhasználó megnyitja a böngészőt\nA felhasználó navigál a MERACE BackOffice oldalra\nA felhasználó beírja a felhasználónevét\nA felhasználó beírja a jelszavát\nA felhasználó rákattint a Bejelentkezés gombra"}
+                      value={newTemplate.stepsText}
+                      onChange={e => setNewTemplate(p => ({...p, stepsText: e.target.value}))}
+                    />
+                    <div className="form-btns">
+                      <button className="btn-cancel" onClick={() => setAddingTemplate(false)}>Mégse</button>
+                      <button className="btn-save" onClick={saveTemplate}>Mentés</button>
+                    </div>
+                  </div>
+                )}
+                {showTemplates && templates.length > 0 && (
+                  <div className="template-grid">
+                    {templates.map(t => (
+                      <div key={t.id} className={`template-card ${selectedTemplates.includes(t.id) ? 'selected' : ''}`} onClick={() => toggleTemplate(t.id)}>
+                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                          <span style={{fontSize:'13px',fontWeight:'500',color:'var(--text)'}}>{t.name}</span>
+                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteTemplate(t.id); }}>
+                            <i className="ti ti-trash" />
+                          </button>
+                        </div>
+                        {t.description && <div style={{fontSize:'12px',color:'var(--muted)',marginTop:'2px'}}>{t.description}</div>}
+                        <div className="template-steps">{t.steps.length} lépés · {selectedTemplates.includes(t.id) ? '✓ Kiválasztva' : 'Kattints a kiválasztáshoz'}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {selectedTemplates.length > 0 && (
+                  <div style={{fontSize:'12px',color:'var(--accent-light)',marginTop:'.5rem'}}>
+                    <i className="ti ti-check" /> {selectedTemplates.length} sablon lesz felhasználva a generálás során
+                  </div>
+                )}
+              </div>
+            )}
 
             {!isSignedIn ? (
               <SignUpButton mode="modal">

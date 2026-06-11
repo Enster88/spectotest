@@ -11,13 +11,26 @@ export default async function handler(req, res) {
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: 'Bejelentkezés szükséges.' });
 
-  const { specText, language = 'hu' } = req.body;
+  const { specText, language = 'hu', stepTemplates = [] } = req.body;
 
   if (!specText || specText.trim().length < 20) {
     return res.status(400).json({ error: 'Túl rövid a specifikáció.' });
   }
 
-  const langInstruction = language === 'en'
+  // Build step templates context
+  let templatesContext = '';
+  if (stepTemplates.length > 0) {
+    templatesContext = `\n\nElérhető lépés sablonok (használd ezeket a navigációs és UI lépésekhez ahol releváns):\n`;
+    stepTemplates.forEach(t => {
+      templatesContext += `\n### ${t.name}\n`;
+      if (t.description) templatesContext += `${t.description}\n`;
+      t.steps.forEach(s => {
+        templatesContext += `- ${typeof s === 'object' ? s.action : s}\n`;
+      });
+    });
+  }
+
+    const langInstruction = language === 'en'
     ? 'Generate all test cases in English.'
     : 'Minden tesztesetet magyar nyelven generálj.';
 
@@ -68,7 +81,7 @@ Fókuszálj:
 - UI/UX ellenőrzésekre ahol releváns
 
 Specifikáció:
-${specText.substring(0, 8000)}`
+${specText.substring(0, 7000)}${templatesContext}`
       }]
     });
 
