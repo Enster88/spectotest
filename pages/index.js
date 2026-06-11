@@ -277,6 +277,7 @@ export default function Home() {
         .field-group label { font-size: 11px; color: var(--muted); display: block; margin-bottom: .3rem; font-weight: 500; letter-spacing: .5px; text-transform: uppercase; }
         .field-group input, .field-group select { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; }
         .field-group input:focus, .field-group select:focus { outline: none; border-color: var(--accent); }
+        .template-badge { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 8px; font-size: 11px; color: var(--accent-light); margin-bottom: .5rem; }
         .template-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: .875rem 1rem; cursor: pointer; transition: all .15s; }
         .template-card:hover { border-color: var(--accent); }
         .template-card.selected { border-color: var(--accent); background: var(--accent-bg); }
@@ -486,23 +487,29 @@ export default function Home() {
                       <span className="tc-badge" style={{ background: 'var(--surface2)', color: 'var(--muted)' }}>{tc.category}</span>
                     </div>
                     {tc.preconditions && <div className="tc-body" style={{ marginBottom: '.4rem' }}><strong style={{ color: 'var(--muted)' }}>Előfeltétel:</strong> {tc.preconditions}</div>}
+                    {tc.templateName && (
+                      <div className="template-badge">
+                        <i className="ti ti-layout-list" /> {tc.templateName}
+                      </div>
+                    )}
+                    {tc.objective && (
+                      <div className="tc-body" style={{marginBottom:'.4rem',fontStyle:'italic'}}>{tc.objective}</div>
+                    )}
                     {tc.steps && tc.steps.length > 0 && (
                       <ul className="tc-steps">
-                        {tc.steps.map((s, i) => (
-                          <li key={i}>
-                            {typeof s === 'object' ? s.action : s}
-                            {typeof s === 'object' && s.expected && (
-                              <span style={{color:'var(--green)',fontSize:'12px',display:'block',marginLeft:'8px'}}>→ {s.expected}</span>
-                            )}
-                          </li>
-                        ))}
+                        {tc.steps.map((s, i) => {
+                          const action = typeof s === 'object' ? s.action : s;
+                          const expected = typeof s === 'object' ? s.expected : '';
+                          const testData = typeof s === 'object' ? s.testData : '';
+                          return (
+                            <li key={i}>
+                              {action}
+                              {testData && <span style={{color:'var(--yellow)',fontSize:'12px',display:'block',marginLeft:'8px',whiteSpace:'pre-line'}}>📋 {testData}</span>}
+                              {expected && <span style={{color:'var(--green)',fontSize:'12px',display:'block',marginLeft:'8px'}}>→ {expected}</span>}
+                            </li>
+                          );
+                        })}
                       </ul>
-                    )}
-                    {tc.expectedResult && typeof tc.steps[0] !== 'object' && (
-                      <div className="tc-expected">
-                        <i className="ti ti-circle-check" />
-                        {tc.expectedResult}
-                      </div>
                     )}
                   </div>
                 </div>

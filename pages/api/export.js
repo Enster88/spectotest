@@ -3,6 +3,7 @@ import { getAuth } from '@clerk/nextjs/server';
 export const config = { api: { bodyParser: { sizeLimit: '10mb' } } };
 
 const OUTPUT_COLS = [
+  { key: 'key',              header: 'Key',                                           width: 10 },
   { key: 'name',             header: 'Name',                                          width: 52 },
   { key: 'status',           header: 'Status',                                        width: 10 },
   { key: 'precondition',     header: 'Precondition',                                  width: 32 },
@@ -20,15 +21,16 @@ const OUTPUT_COLS = [
   { key: 'step',             header: 'Test Script (Step-by-Step) - Step',             width: 46 },
   { key: 'test_data',        header: 'Test Script (Step-by-Step) - Test Data',        width: 36 },
   { key: 'expected_result',  header: 'Test Script (Step-by-Step) - Expected Result',  width: 46 },
+  { key: 'plain_text',       header: 'Test Script (Plain Text)',                      width: 20 },
+  { key: 'bdd',              header: 'Test Script (BDD)',                             width: 20 },
 ];
 
 const FIRST_ROW_ONLY = new Set([
-  'name','status','precondition','objective','folder',
+  'key','name','status','precondition','objective','folder',
   'priority','component','labels','owner','estimated_time',
   'coverage_issues','coverage_pages','test_type','test_set'
 ]);
 
-// Colors matching tc_output.xlsx
 const C_HEADER_BG = 'FF1E1E2E';
 const C_HEADER_FG = 'FFCDD6F4';
 const C_FIRST_BG  = 'FFF0EDE6';
@@ -49,12 +51,10 @@ export default async function handler(req, res) {
   if (!testCases || !testCases.length) return res.status(400).json({ error: 'Nincsenek tesztesetek.' });
 
   try {
-    // Use ExcelJS for proper formatting
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('Test Cases');
 
-    // Column widths
     ws.columns = OUTPUT_COLS.map(c => ({ header: c.header, key: c.key, width: c.width }));
 
     // Style header row
@@ -77,41 +77,45 @@ export default async function handler(req, res) {
     let alt = false;
     let rowExcel = 2;
 
-    testCases.forEach(tc => {
-      // Support both old string[] and new {action, expected}[] format
-      const rawSteps = Array.isArray(tc.steps) ? tc.steps : [tc.steps || ''];
-      const steps = rawSteps.map(s => typeof s === 'object' ? s : { action: s, expected: '' });
-      alt = !alt;
+    testCases.forEach((tc, tcIdx) => {
+      const rawSteps = Array.isArray(tc.steps) ? tc.steps : [{ action: tc.steps || '', expected: '', testData: '' }];
+      const steps = rawSteps.map(s => typeof s === 'object' ? s : { action: s, expected: '', testData: '' });
       const nSteps = steps.length;
+      alt = !alt;
 
       steps.forEach((step, idx) => {
         const isFirst = idx === 0;
-        const isLast  = idx === nSteps - 1;
+        const isLast = idx === nSteps - 1;
 
         const rowData = {};
         OUTPUT_COLS.forEach(col => {
           if (FIRST_ROW_ONLY.has(col.key)) {
             if (!isFirst) { rowData[col.key] = ''; return; }
             switch (col.key) {
-              case 'name':           rowData[col.key] = tc.title || ''; break;
+              case 'key':            rowData[col.key] = ''; break; // empty - Jira fills this
+              case 'name':           rowData[col.key] = tc.name || tc.title || ''; break;
               case 'status':         rowData[col.key] = fixedFields.status || 'Draft'; break;
               case 'precondition':   rowData[col.key] = tc.preconditions || fixedFields.precondition || ''; break;
-              case 'objective':      rowData[col.key] = tc.title || ''; break;
+              case 'objective':      rowData[col.key] = tc.objective || ''; break;
               case 'folder':         rowData[col.key] = fixedFields.folder || ''; break;
               case 'priority':       rowData[col.key] = tc.priority || fixedFields.priority || 'Medium'; break;
               case 'component':      rowData[col.key] = fixedFields.component || ''; break;
-              case 'labels':         rowData[col.key] = fixedFields.labels || ''; break;
+              case 'labels':         rowData[col.key] = tc.labels || fixedFields.labels || ''; break;
               case 'owner':          rowData[col.key] = fixedFields.owner || ''; break;
-              case 'estimated_time': rowData[col.key] = fixedFields.estimated_time || ''; break;
+              case 'estimated_time': rowData[col.key] = fixedFields.estimated_time || 'hh:mm'; break;
               case 'coverage_issues':rowData[col.key] = fixedFields.coverage_issues || ''; break;
               case 'coverage_pages': rowData[col.key] = fixedFields.coverage_pages || ''; break;
               case 'test_type':      rowData[col.key] = fixedFields.test_type || 'Functional'; break;
               case 'test_set':       rowData[col.key] = fixedFields.test_set || ''; break;
             }
           } else {
-            if (col.key === 'step') rowData[col.key] = step.action || step;
-            else if (col.key === 'expected_result') rowData[col.key] = step.expected || (isFirst ? tc.expectedResult || '' : '');
-            else rowData[col.key] = '';
+            switch (col.key) {
+              case 'step':           rowData[col.key] = step.action || ''; break;
+              case 'test_data':      rowData[col.key] = step.testData || ''; break;
+              case 'expected_result':rowData[col.key] = step.expected || ''; break;
+              case 'plain_text':     rowData[col.key] = ''; break;
+              case 'bdd':            rowData[col.key] = ''; break;
+            }
           }
         });
 
@@ -134,10 +138,10 @@ export default async function handler(req, res) {
           };
           cell.alignment = { wrapText: true, vertical: 'top' };
           cell.border = {
-            top:    { style: 'thin',        color: { argb: C_BORDER } },
-            bottom: { style: bottomStyle,   color: { argb: bottomColor } },
-            left:   { style: 'thin',        color: { argb: C_BORDER } },
-            right:  { style: 'thin',        color: { argb: C_BORDER } },
+            top:    { style: 'thin',      color: { argb: C_BORDER } },
+            bottom: { style: bottomStyle, color: { argb: bottomColor } },
+            left:   { style: 'thin',      color: { argb: C_BORDER } },
+            right:  { style: 'thin',      color: { argb: C_BORDER } },
           };
         });
 

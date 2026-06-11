@@ -11,99 +11,120 @@ export default async function handler(req, res) {
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: 'Bejelentkezés szükséges.' });
 
-  const { specText, language = 'hu', stepTemplates = [] } = req.body;
+  const { specText, language = 'en', stepTemplates = [] } = req.body;
 
   if (!specText || specText.trim().length < 20) {
     return res.status(400).json({ error: 'Túl rövid a specifikáció.' });
   }
 
-  // Build step templates context
-  let templatesContext = '';
+  const langNote = language === 'hu'
+    ? 'Generate all names, objectives, preconditions and test data in HUNGARIAN.'
+    : 'Generate all names, objectives, preconditions and test data in ENGLISH.';
+
+  // Build template list for AI
+  let templatesSection = '';
   if (stepTemplates.length > 0) {
-    templatesContext = `\n\nElérhető lépés sablonok (használd ezeket a navigációs és UI lépésekhez ahol releváns):\n`;
+    templatesSection = '\n\nAVAILABLE STEP TEMPLATES:\n';
     stepTemplates.forEach(t => {
-      templatesContext += `\n### ${t.name}\n`;
-      if (t.description) templatesContext += `${t.description}\n`;
-      t.steps.forEach(s => {
-        templatesContext += `- ${typeof s === 'object' ? s.action : s}\n`;
-      });
+      const steps = t.steps.map(s => typeof s === 'object' ? s.action : s);
+      templatesSection += `\nTemplate name: "${t.name}"\nSteps:\n${steps.map(s => `  - ${s}`).join('\n')}\n`;
     });
+    templatesSection += `\nFor each test case, pick the most appropriate template from the list above based on what the test case is doing (creation, modification, validity change, etc.). Set "templateName" to exactly the template name you chose.`;
+  } else {
+    templatesSection = '\n\nNo step templates provided. Generate generic steps for each test case.';
   }
 
-    const langInstruction = language === 'en'
-    ? 'Generate all test cases in English.'
-    : 'Minden tesztesetet magyar nyelven generálj.';
-
   try {
-    console.log('Starting analysis, text length:', specText.length);
     const message = await client.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 16000,
       messages: [{
         role: 'user',
-        content: `Te egy tapasztalt QA mérnök vagy. Elemezd az alábbi szoftver specifikációt és generálj regressziós teszteset ötleteket belőle.
+        content: `You are an expert QA engineer. Analyze the specification and generate regression test cases.
 
-${langInstruction}
+${langNote}
 
-Válaszolj KIZÁRÓLAG valid JSON-ban, semmi más szöveg nélkül.
+RULES:
+1. NAME: "TCMx - [what is tested] - Positive" or "TCMx - [what is tested] - Negative"
+2. OBJECTIVE: Always "The goal of this test case is to verify that [full sentence]"
+3. LABELS: "HappyDay" for positive, "BadDay" for negative
+4. PRIORITY: "Critical", "High", "Medium", or "Low"
+5. TEST DATA: For the attributes step use format: "Important attributes:\\n- Attribute: Value"
+   For negative/missing: "Important attributes:\\n- Attribute:"
+6. TEMPLATE SELECTION: Choose the best matching template for each TC based on the action (create/modify/delete/etc.)
+${templatesSection}
 
-Struktúra:
+Respond ONLY with valid JSON, no markdown.
+
+JSON structure:
 {
-  "summary": "A spec rövid összefoglalója 2-3 mondatban",
+  "summary": "brief summary",
   "testCases": [
     {
-      "id": "TC001",
-      "title": "Teszteset rövid címe",
-      "category": "Funkcionális | Negatív | Határérték | UI | Teljesítmény | Biztonság",
-      "priority": "Magas | Közepes | Alacsony",
-      "preconditions": "Előfeltételek",
-      "steps": [
-        {"action": "Lépés szövege számozás nélkül", "expected": "Lépés elvárt eredménye"},
-        {"action": "Következő lépés", "expected": "Ennek a lépésnek az elvárt eredménye"}
-      ],
-      "notes": "Megjegyzések, kockázatok (opcionális)"
+      "id": "TCM1",
+      "name": "TCM1 - [description] - Positive",
+      "templateName": "[exact template name or null if no templates]",
+      "priority": "Critical",
+      "preconditions": "The user is...",
+      "objective": "The goal of this test case is to verify that...",
+      "labels": "HappyDay",
+      "testData": "Important attributes:\\n- Attribute: Value"
     }
   ]
 }
 
-Generálj 10-20 tesztesetet. Fontos szabályok a lépésekre:
-- Minden lépés egyetlen atomikus UI akció legyen (pl. "A felhasználó rákattint az Email cím mezőre", "A felhasználó beírja az email címet: test@example.com", "A felhasználó rákattint a Jelszó mezőre")
-- NE számozd a lépéseket (ne írj "1.", "2." előtagot)
-- Minden lépéshez adj meg elvárt eredményt az "expected" mezőben
-- Minden TC-hez legalább 5-8 lépés legyen, UI navigációval együtt
-- A lépések legyenek konkrétak és követhetők
+Note: Only generate testData for the step that fills attributes. The steps themselves will come from the template.
 
-Fókuszálj:
-- Happy path tesztesetekre
-- Negatív tesztesetekre (hibás bemenetek, edge case-ek)
-- Határérték analízisre
-- Regressziós kockázatokra
-- UI/UX ellenőrzésekre ahol releváns
+Generate 10-15 test cases covering happy path, negative, and boundary cases.
 
-Specifikáció:
-${specText.substring(0, 7000)}${templatesContext}`
+SPECIFICATION:
+${specText.substring(0, 7000)}`
       }]
     });
 
     const raw = message.content.map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
-    // Try to fix truncated JSON by finding last complete object
-    let jsonStr = raw;
-    if (!jsonStr.endsWith('}')) {
-      const lastBrace = jsonStr.lastIndexOf('}');
+
+    let result;
+    try {
+      result = JSON.parse(raw);
+    } catch(e) {
+      let fixed = raw;
+      const lastBrace = fixed.lastIndexOf('}');
       if (lastBrace > 0) {
-        // Find the closing of testCases array
-        jsonStr = jsonStr.substring(0, lastBrace + 1);
-        // Try to close the structure
-        const openBraces = (jsonStr.match(/{/g) || []).length;
-        const closeBraces = (jsonStr.match(/}/g) || []).length;
-        for (let i = 0; i < openBraces - closeBraces; i++) jsonStr += '}';
-        if (!jsonStr.includes('"testCases"')) jsonStr = raw;
+        fixed = fixed.substring(0, lastBrace + 1);
+        const opens = (fixed.match(/{/g) || []).length;
+        const closes = (fixed.match(/}/g) || []).length;
+        for (let i = 0; i < opens - closes; i++) fixed += '}';
       }
+      result = JSON.parse(fixed);
     }
-    const result = JSON.parse(jsonStr);
+
+    // Attach actual steps from templates to each TC
+    if (stepTemplates.length > 0) {
+      result.testCases = result.testCases.map(tc => {
+        const template = stepTemplates.find(t => t.name === tc.templateName);
+        if (template) {
+          tc.steps = template.steps.map(s => {
+            const action = typeof s === 'object' ? s.action : s;
+            // Inject testData into the "fills all attributes" step
+            const isDataStep = action.toLowerCase().includes('fills all') || action.toLowerCase().includes('fills the attributes');
+            return {
+              action,
+              expected: typeof s === 'object' ? (s.expected || '') : '',
+              testData: isDataStep ? (tc.testData || '') : ''
+            };
+          });
+        } else {
+          // No template matched - generate generic steps
+          tc.steps = [{ action: 'Execute test case steps', expected: 'Steps completed successfully', testData: tc.testData || '' }];
+        }
+        return tc;
+      });
+    }
+
     res.status(200).json(result);
-  } catch (e) {
-    console.error('Analysis error:', e.message, e.status);
-    res.status(500).json({ error: e.message || 'Elemzési hiba. Kérlek próbáld újra.' });
+  } catch(e) {
+    console.error(e);
+    res.status(500).json({ error: 'Elemzési hiba. Kérlek próbáld újra.' });
   }
 }
