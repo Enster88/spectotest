@@ -31,6 +31,8 @@ export default function Home() {
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [generatingMore, setGeneratingMore] = useState(false);
   const [showDiffMode, setShowDiffMode] = useState(false);
+  const [specFileBase64, setSpecFileBase64] = useState(null);
+  const [specFileType, setSpecFileType] = useState(null);
   const [diffResult, setDiffResult] = useState(null);
   const [oldSpecText, setOldSpecText] = useState('');
   const [oldSpecFile, setOldSpecFile] = useState(null);
