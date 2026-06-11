@@ -29,6 +29,7 @@ export default function Home() {
   const [projectName, setProjectName] = useState('');
   const [showSaveProject, setShowSaveProject] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
+  const [generatingMore, setGeneratingMore] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [selectedTemplates, setSelectedTemplates] = useState([]);
@@ -237,6 +238,30 @@ export default function Home() {
     if (!data.error) {
       setTemplates(prev => prev.map(t => t.id === data.id ? data : t));
       setEditingTemplate(null);
+    }
+  };
+
+  const generateMoreTCs = async (count) => {
+    setGeneratingMore(true);
+    try {
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          specText,
+          stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)),
+          existingTestCases: testCases,
+          generateMore: count
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const newTCs = (data.testCases || []).map(tc => ({ ...tc, selected: true, isNew: true }));
+      setTestCases(prev => [...prev, ...newTCs]);
+    } catch(e) {
+      setError(e.message);
+    } finally {
+      setGeneratingMore(false);
     }
   };
 
@@ -609,6 +634,9 @@ export default function Home() {
               <button className="back-btn" onClick={() => { setStep('input'); setError(''); }}>← Vissza</button>
               <button className="btn-ghost" onClick={selectAll}>Összes kijelölése</button>
               <button className="btn-ghost" onClick={deselectAll}>Összes törlése</button>
+              <button className="btn-ghost" onClick={() => generateMoreTCs(20)} disabled={generatingMore} style={{borderColor:'var(--green)',color:'var(--green)'}}>
+                {generatingMore ? '⏳ Generálás...' : '+ 20 új TC'}
+              </button>
             </div>
           </div>
 
