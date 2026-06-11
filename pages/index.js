@@ -24,7 +24,9 @@ export default function Home() {
   const [templates, setTemplates] = useState([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [selectedTemplates, setSelectedTemplates] = useState([]);
-  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', stepsText: '' });
+  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', rows: [
+    { action: '', testData: '', expected: '' }
+  ] });
   const [addingTemplate, setAddingTemplate] = useState(false);
   const [templateBase64, setTemplateBase64] = useState(null);
   const [language, setLanguage] = useState('hu');
@@ -104,12 +106,11 @@ export default function Home() {
   };
 
   const saveTemplate = async () => {
-    if (!newTemplate.name || !newTemplate.stepsText) return;
-    const steps = newTemplate.stepsText
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(s => ({ action: s, expected: '' }));
+    if (!newTemplate.name) return;
+    const steps = newTemplate.rows
+      .filter(r => r.action.trim())
+      .map(r => ({ action: r.action.trim(), testData: r.testData.trim(), expected: r.expected.trim() }));
+    if (!steps.length) return;
 
     const res = await fetch('/api/templates', {
       method: 'POST',
@@ -119,10 +120,14 @@ export default function Home() {
     const data = await res.json();
     if (!data.error) {
       setTemplates(prev => [data, ...prev]);
-      setNewTemplate({ name: '', description: '', stepsText: '' });
+      setNewTemplate({ name: '', description: '', rows: [{ action: '', testData: '', expected: '' }] });
       setAddingTemplate(false);
     }
   };
+
+  const addStepRow = () => setNewTemplate(p => ({ ...p, rows: [...p.rows, { action: '', testData: '', expected: '' }] }));
+  const removeStepRow = (i) => setNewTemplate(p => ({ ...p, rows: p.rows.filter((_, idx) => idx !== i) }));
+  const updateStepRow = (i, field, val) => setNewTemplate(p => ({ ...p, rows: p.rows.map((r, idx) => idx === i ? { ...r, [field]: val } : r) }));
 
   const deleteTemplate = async (id) => {
     await fetch(`/api/templates?id=${id}`, { method: 'DELETE' });
@@ -283,6 +288,16 @@ export default function Home() {
         .template-card.selected { border-color: var(--accent); background: var(--accent-bg); }
         .template-steps { font-size: 12px; color: var(--muted); margin-top: .4rem; line-height: 1.6; }
         .template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-top: .75rem; }
+        .steps-table { width: 100%; border-collapse: collapse; margin-top: .75rem; font-size: 13px; }
+        .steps-table th { background: var(--surface); color: var(--muted); font-weight: 500; padding: 6px 8px; text-align: left; border: 1px solid var(--border); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+        .steps-table td { border: 1px solid var(--border); padding: 0; vertical-align: top; }
+        .steps-table td input, .steps-table td textarea { width: 100%; background: transparent; border: none; padding: 6px 8px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; resize: none; min-height: 32px; }
+        .steps-table td input:focus, .steps-table td textarea:focus { outline: none; background: var(--accent-bg); }
+        .steps-table tr:hover td { background: var(--surface2); }
+        .add-step-btn { background: none; border: 1px dashed var(--border); border-radius: 6px; padding: 5px 12px; font-size: 12px; color: var(--muted); cursor: pointer; font-family: 'Inter', sans-serif; margin-top: .5rem; width: 100%; }
+        .add-step-btn:hover { border-color: var(--accent); color: var(--accent-light); }
+        .remove-step-btn { background: none; border: none; color: var(--muted); cursor: pointer; padding: 4px 6px; font-size: 13px; }
+        .remove-step-btn:hover { color: var(--red); }
         .new-template-form { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-top: .75rem; display: flex; flex-direction: column; gap: .75rem; }
         .new-template-form input, .new-template-form textarea { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; width: 100%; }
         .new-template-form input:focus, .new-template-form textarea:focus { outline: none; border-color: var(--accent); }
@@ -378,7 +393,7 @@ export default function Home() {
                 {addingTemplate && (
                   <div className="new-template-form">
                     <input
-                      placeholder="Sablon neve (pl. MERACE bejelentkezés)"
+                      placeholder="Sablon neve (pl. Physical Unit létrehozás)"
                       value={newTemplate.name}
                       onChange={e => setNewTemplate(p => ({...p, name: e.target.value}))}
                     />
@@ -387,11 +402,29 @@ export default function Home() {
                       value={newTemplate.description}
                       onChange={e => setNewTemplate(p => ({...p, description: e.target.value}))}
                     />
-                    <textarea
-                      placeholder={"Lépések – soronként egy lépés:\nA felhasználó megnyitja a böngészőt\nA felhasználó navigál a MERACE BackOffice oldalra\nA felhasználó beírja a felhasználónevét\nA felhasználó beírja a jelszavát\nA felhasználó rákattint a Bejelentkezés gombra"}
-                      value={newTemplate.stepsText}
-                      onChange={e => setNewTemplate(p => ({...p, stepsText: e.target.value}))}
-                    />
+                    <table className="steps-table">
+                      <thead>
+                        <tr>
+                          <th style={{width:'45%'}}>Step</th>
+                          <th style={{width:'25%'}}>Test Data</th>
+                          <th style={{width:'25%'}}>Expected Result</th>
+                          <th style={{width:'5%'}}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {newTemplate.rows.map((row, i) => (
+                          <tr key={i}>
+                            <td><textarea rows={2} placeholder="The user navigates to..." value={row.action} onChange={e => updateStepRow(i, 'action', e.target.value)} /></td>
+                            <td><textarea rows={2} placeholder="Important attributes:..." value={row.testData} onChange={e => updateStepRow(i, 'testData', e.target.value)} /></td>
+                            <td><textarea rows={2} placeholder="The screen was opened" value={row.expected} onChange={e => updateStepRow(i, 'expected', e.target.value)} /></td>
+                            <td style={{textAlign:'center',verticalAlign:'middle'}}>
+                              <button className="remove-step-btn" onClick={() => removeStepRow(i)}><i className="ti ti-x" /></button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <button className="add-step-btn" onClick={addStepRow}>+ Lépés hozzáadása</button>
                     <div className="form-btns">
                       <button className="btn-cancel" onClick={() => setAddingTemplate(false)}>Mégse</button>
                       <button className="btn-save" onClick={saveTemplate}>Mentés</button>
