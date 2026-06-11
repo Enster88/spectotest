@@ -112,8 +112,10 @@ export default async function handler(req, res) {
             switch (col.key) {
               case 'step':           rowData[col.key] = step.action || ''; break;
               case 'test_data': {
-                const td = step.testData || '';
-                rowData[col.key] = (td.trim() === 'Important attributes:' || td.trim() === '') ? '' : td;
+                const td = (step.testData || '').trim();
+                // Skip if empty or just the header with nothing after it
+                const isEmptyData = !td || td === 'Important attributes:' || /^Important attributes:\s*$/.test(td);
+                rowData[col.key] = isEmptyData ? '' : td;
                 break;
               }
               case 'expected_result':rowData[col.key] = step.expected || ''; break;

@@ -64,6 +64,13 @@ TEST DATA RULES:
 - Never write just "Important attributes:" with nothing after it
 
 EXHAUSTIVE COVERAGE RULES - this is critical:
+- Think systematically: list ALL entity types, ALL categories, ALL attribute combinations from the spec
+- For each entity type × category combination = separate TC
+- For boundary values: generate TC for each: min valid, max valid, min invalid, max invalid, empty, null, special chars
+- For modifications: test each attribute change (increase, decrease, to zero, to null)
+- For category changes: test each direction (A→B and B→A)
+- Aim for 40-80 test cases for a complex spec
+- MUST generate test cases for ALL provided templates proportionally
 - Generate a SEPARATE test case for EVERY combination mentioned in the spec
 - For each entity type (Consumer, Producer, Transmission Line etc) × each category (FIT, FIP etc) = separate TC
 - For each boundary value = separate TC  
