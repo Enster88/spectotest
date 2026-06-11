@@ -30,6 +30,12 @@ export default function Home() {
   const [showSaveProject, setShowSaveProject] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [generatingMore, setGeneratingMore] = useState(false);
+  const [showDiffMode, setShowDiffMode] = useState(false);
+  const [diffResult, setDiffResult] = useState(null);
+  const [oldSpecText, setOldSpecText] = useState('');
+  const [oldSpecFile, setOldSpecFile] = useState(null);
+  const [oldSpecFileBase64, setOldSpecFileBase64] = useState(null);
+  const [oldSpecFileType, setOldSpecFileType] = useState(null);
 
   useEffect(() => {
     if (isSignedIn) {
