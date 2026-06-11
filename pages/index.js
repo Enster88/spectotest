@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Head from 'next/head';
 import { useUser, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs';
 
@@ -30,6 +30,17 @@ export default function Home() {
   const [showSaveProject, setShowSaveProject] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [generatingMore, setGeneratingMore] = useState(false);
+
+  useEffect(() => {
+    if (isSignedIn) {
+      fetch('/api/templates')
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setTemplates(data); });
+      fetch('/api/projects')
+        .then(r => r.json())
+        .then(data => { if (Array.isArray(data)) setProjects(data); });
+    }
+  }, [isSignedIn]);
   const [templates, setTemplates] = useState([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [selectedTemplates, setSelectedTemplates] = useState([]);
