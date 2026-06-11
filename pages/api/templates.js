@@ -31,6 +31,34 @@ export default async function handler(req, res) {
     return res.status(201).json(data);
   }
 
+  if (req.method === 'PUT') {
+    const { id } = req.query;
+    const { name, description, steps } = req.body;
+    const { data, error } = await supabase
+      .from('step_templates')
+      .update({ name, description, steps })
+      .eq('id', id).eq('user_id', userId)
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(200).json(data);
+  }
+
+  // Clone template
+  if (req.method === 'PATCH') {
+    const { id } = req.query;
+    const { data: orig, error: fetchErr } = await supabase
+      .from('step_templates').select('*').eq('id', id).eq('user_id', userId).single();
+    if (fetchErr) return res.status(404).json({ error: 'Nem található.' });
+    const { data, error } = await supabase.from('step_templates').insert({
+      user_id: userId,
+      name: orig.name + ' (másolat)',
+      description: orig.description,
+      steps: orig.steps
+    }).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.status(201).json(data);
+  }
+
   if (req.method === 'DELETE') {
     const { id } = req.query;
     const { error } = await supabase

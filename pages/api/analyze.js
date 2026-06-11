@@ -64,13 +64,32 @@ TEST DATA RULES:
 - Never write just "Important attributes:" with nothing after it
 
 EXHAUSTIVE COVERAGE RULES - this is critical:
-- Think systematically: list ALL entity types, ALL categories, ALL attribute combinations from the spec
-- For each entity type × category combination = separate TC
-- For boundary values: generate TC for each: min valid, max valid, min invalid, max invalid, empty, null, special chars
-- For modifications: test each attribute change (increase, decrease, to zero, to null)
-- For category changes: test each direction (A→B and B→A)
-- Aim for 40-80 test cases for a complex spec
-- MUST generate test cases for ALL provided templates proportionally
+
+ENTITY TYPE MULTIPLICATION:
+- First, identify ALL entity types mentioned in the spec (e.g. Consumer, Producer, Transmission Line)
+- For EACH test scenario × EACH entity type = separate TC
+- Example: "FIT category with IC filled" for Consumer + for Producer + for Transmission Line = 3 TCs
+- Name must include entity type: "Checking the creation of a Consumer Physical Unit..."
+
+DELETED/REMOVED VALIDATIONS:
+- If spec says a validation is DELETED or REMOVED, generate TCs to verify the deletion works
+- Test that previously forbidden values are now ACCEPTED
+- Example: if Name max-length validation deleted → test with 10, 50, 255+ chars
+- Example: if special chars forbidden → test each special char: ', ", +, !, %, /, =, (, ), . separately
+- Label these as Positive (they should now succeed)
+
+BOUNDARY VALUE ANALYSIS:
+- For each numeric attribute: min-1 (invalid), min (valid), min+1 (valid), max-1 (valid), max (valid), max+1 (invalid)
+- For each string attribute: empty, 1 char, max-1 chars, max chars, max+1 chars
+- For each enum/category: each valid value, invalid value
+
+COMBINATION COVERAGE:
+- Category changes: every direction (A→B, B→A for all combinations)
+- IC with each category type separately
+- Modification of each attribute separately
+
+Aim for 60-100 test cases for a complex spec.
+MUST use ALL provided templates proportionally.
 - Generate a SEPARATE test case for EVERY combination mentioned in the spec
 - For each entity type (Consumer, Producer, Transmission Line etc) × each category (FIT, FIP etc) = separate TC
 - For each boundary value = separate TC  

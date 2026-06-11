@@ -23,6 +23,12 @@ export default function Home() {
     estimated_time: 'hh:mm'
   });
   const [showFixedFields, setShowFixedFields] = useState(false);
+  const [projects, setProjects] = useState([]);
+  const [showProjects, setShowProjects] = useState(false);
+  const [currentProject, setCurrentProject] = useState(null);
+  const [projectName, setProjectName] = useState('');
+  const [showSaveProject, setShowSaveProject] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState(null);
   const [templates, setTemplates] = useState([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [selectedTemplates, setSelectedTemplates] = useState([]);
@@ -139,6 +145,99 @@ export default function Home() {
 
   const toggleTemplate = (id) => {
     setSelectedTemplates(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+  };
+
+  const saveProject = async () => {
+    if (!projectName.trim()) return;
+    const body = {
+      name: projectName,
+      specText: specText,
+      templateIds: selectedTemplates,
+      testCases: testCases,
+      fixedFields
+    };
+    let data;
+    if (currentProject) {
+      const res = await fetch(`/api/projects?id=${currentProject.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      data = await res.json();
+    } else {
+      const res = await fetch('/api/projects', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+      });
+      data = await res.json();
+    }
+    if (!data.error) {
+      setCurrentProject(data);
+      setProjects(prev => {
+        const exists = prev.find(p => p.id === data.id);
+        return exists ? prev.map(p => p.id === data.id ? data : p) : [data, ...prev];
+      });
+      setShowSaveProject(false);
+    }
+  };
+
+  const loadProject = async (id) => {
+    const res = await fetch(`/api/projects?id=${id}`);
+    const data = await res.json();
+    if (!data.error) {
+      setCurrentProject(data);
+      setProjectName(data.name);
+      setSpecText(data.spec_text || '');
+      setFixedFields(data.fixed_fields || fixedFields);
+      setSelectedTemplates(data.template_ids || []);
+      if (data.test_cases?.length) {
+        setTestCases(data.test_cases);
+        setResult({ summary: '', testCases: data.test_cases });
+        setState('review');
+      } else {
+        setState('input');
+      }
+      setShowProjects(false);
+    }
+  };
+
+  const deleteProject = async (id) => {
+    await fetch(`/api/projects?id=${id}`, { method: 'DELETE' });
+    setProjects(prev => prev.filter(p => p.id !== id));
+    if (currentProject?.id === id) setCurrentProject(null);
+  };
+
+  const cloneTemplate = async (id) => {
+    const res = await fetch(`/api/templates?id=${id}`, { method: 'PATCH' });
+    const data = await res.json();
+    if (!data.error) setTemplates(prev => [data, ...prev]);
+  };
+
+  const startEditTemplate = (t) => {
+    setEditingTemplate({
+      id: t.id,
+      name: t.name,
+      description: t.description || '',
+      rows: t.steps.map(s => ({
+        action: typeof s === 'object' ? s.action : s,
+        testData: typeof s === 'object' ? (s.testData || '') : '',
+        expected: typeof s === 'object' ? (s.expected || '') : ''
+      }))
+    });
+  };
+
+  const saveEditTemplate = async () => {
+    if (!editingTemplate) return;
+    const steps = editingTemplate.rows
+      .filter(r => r.action.trim())
+      .map(r => ({ action: r.action.trim(), testData: r.testData.trim(), expected: r.expected.trim() }));
+    const res = await fetch(`/api/templates?id=${editingTemplate.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editingTemplate.name, description: editingTemplate.description, steps })
+    });
+    const data = await res.json();
+    if (!data.error) {
+      setTemplates(prev => prev.map(t => t.id === data.id ? data : t));
+      setEditingTemplate(null);
+    }
   };
 
   const exportXLS = async () => {
@@ -284,6 +383,17 @@ export default function Home() {
         .field-group label { font-size: 11px; color: var(--muted); display: block; margin-bottom: .3rem; font-weight: 500; letter-spacing: .5px; text-transform: uppercase; }
         .field-group input, .field-group select { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; }
         .field-group input:focus, .field-group select:focus { outline: none; border-color: var(--accent); }
+        .project-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100; display: flex; align-items: center; justify-content: center; }
+        .project-modal-inner { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; width: 520px; max-height: 80vh; overflow-y: auto; }
+        .project-modal-inner h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; margin-bottom: 1rem; }
+        .project-item { display: flex; align-items: center; justify-content: space-between; padding: .75rem 1rem; background: var(--surface2); border-radius: 8px; margin-bottom: .5rem; cursor: pointer; transition: border .15s; border: 1px solid var(--border); }
+        .project-item:hover { border-color: var(--accent); }
+        .project-item-name { font-size: 14px; font-weight: 500; color: var(--text); }
+        .project-item-date { font-size: 12px; color: var(--muted); margin-top: 2px; }
+        .project-actions { display: flex; gap: 6px; }
+        .modal-input { width: 100%; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; color: var(--text); font-family: 'Inter', sans-serif; margin-bottom: 1rem; }
+        .modal-input:focus { outline: none; border-color: var(--accent); }
+        .modal-btns { display: flex; gap: 8px; justify-content: flex-end; }
         .template-badge { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-bg); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 8px; font-size: 11px; color: var(--accent-light); margin-bottom: .5rem; }
         .template-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: .875rem 1rem; cursor: pointer; transition: all .15s; }
         .template-card:hover { border-color: var(--accent); }
@@ -321,7 +431,20 @@ export default function Home() {
 
       <nav>
         <div className="logo">Specto<span>Test</span></div>
-        <div className="nav-right">
+        <div className="nav-right" style={{gap:'8px'}}>
+          {isSignedIn && (
+            <>
+              {currentProject && <span style={{fontSize:'12px',color:'var(--muted)',maxWidth:'150px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{currentProject.name}</span>}
+              <button className="btn-ghost" onClick={() => setShowProjects(true)}>
+                <i className="ti ti-folder" /> Projektek
+              </button>
+            </>
+          )}
+          {isSignedIn && step === 'review' && (
+            <button className="btn-primary" onClick={() => { setProjectName(currentProject?.name || ''); setShowSaveProject(true); }}>
+              <i className="ti ti-device-floppy" /> Mentés
+            </button>
+          )}
           {!isSignedIn ? (
             <>
               <SignInButton mode="modal">
@@ -431,9 +554,11 @@ export default function Home() {
                       <div key={t.id} className={`template-card ${selectedTemplates.includes(t.id) ? 'selected' : ''}`} onClick={() => toggleTemplate(t.id)}>
                         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                           <span style={{fontSize:'13px',fontWeight:'500',color:'var(--text)'}}>{t.name}</span>
-                          <button className="delete-btn" onClick={e => { e.stopPropagation(); deleteTemplate(t.id); }}>
-                            <i className="ti ti-trash" />
-                          </button>
+                          <div style={{display:'flex',gap:'4px'}} onClick={e => e.stopPropagation()}>
+                            <button className="delete-btn" title="Szerkesztés" onClick={() => startEditTemplate(t)}><i className="ti ti-pencil" /></button>
+                            <button className="delete-btn" title="Másolás" onClick={() => cloneTemplate(t.id)}><i className="ti ti-copy" /></button>
+                            <button className="delete-btn" title="Törlés" onClick={() => deleteTemplate(t.id)}><i className="ti ti-trash" /></button>
+                          </div>
                         </div>
                         {t.description && <div style={{fontSize:'12px',color:'var(--muted)',marginTop:'2px'}}>{t.description}</div>}
                         <div className="template-steps">{t.steps.length} lépés · {selectedTemplates.includes(t.id) ? '✓ Kiválasztva' : 'Kattints a kiválasztáshoz'}</div>
@@ -595,6 +720,90 @@ export default function Home() {
                 <i className="ti ti-download" />
                 Exportálás XLS-be
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Projects Modal */}
+      {showProjects && (
+        <div className="project-modal" onClick={() => setShowProjects(false)}>
+          <div className="project-modal-inner" onClick={e => e.stopPropagation()}>
+            <h3>Projektek</h3>
+            {projects.length === 0 && <p style={{fontSize:'14px',color:'var(--muted)'}}>Még nincs mentett projekt.</p>}
+            {projects.map(p => (
+              <div key={p.id} className="project-item" onClick={() => loadProject(p.id)}>
+                <div>
+                  <div className="project-item-name">{p.name}</div>
+                  <div className="project-item-date">{new Date(p.updated_at).toLocaleDateString('hu-HU')}</div>
+                </div>
+                <div className="project-actions" onClick={e => e.stopPropagation()}>
+                  <button className="delete-btn" onClick={() => deleteProject(p.id)}><i className="ti ti-trash" /></button>
+                </div>
+              </div>
+            ))}
+            <div style={{marginTop:'1rem',textAlign:'right'}}>
+              <button className="btn-cancel" onClick={() => setShowProjects(false)}>Bezárás</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Project Modal */}
+      {showSaveProject && (
+        <div className="project-modal" onClick={() => setShowSaveProject(false)}>
+          <div className="project-modal-inner" onClick={e => e.stopPropagation()}>
+            <h3>Projekt mentése</h3>
+            <input
+              className="modal-input"
+              placeholder="Projekt neve (pl. ChR-51 Physical Unit)"
+              value={projectName}
+              onChange={e => setProjectName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveProject()}
+              autoFocus
+            />
+            <div className="modal-btns">
+              <button className="btn-cancel" onClick={() => setShowSaveProject(false)}>Mégse</button>
+              <button className="btn-save" onClick={saveProject}>Mentés</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Template Modal */}
+      {editingTemplate && (
+        <div className="project-modal" onClick={() => setEditingTemplate(null)}>
+          <div className="project-modal-inner" style={{width:'780px',maxWidth:'95vw'}} onClick={e => e.stopPropagation()}>
+            <h3>Sablon szerkesztése</h3>
+            <input className="modal-input" placeholder="Sablon neve" value={editingTemplate.name}
+              onChange={e => setEditingTemplate(p => ({...p, name: e.target.value}))} />
+            <input className="modal-input" placeholder="Leírás (opcionális)" value={editingTemplate.description}
+              onChange={e => setEditingTemplate(p => ({...p, description: e.target.value}))} />
+            <table className="steps-table">
+              <thead>
+                <tr>
+                  <th style={{width:'45%'}}>Step</th>
+                  <th style={{width:'25%'}}>Test Data</th>
+                  <th style={{width:'25%'}}>Expected Result</th>
+                  <th style={{width:'5%'}}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {editingTemplate.rows.map((row, i) => (
+                  <tr key={i}>
+                    <td><textarea rows={2} value={row.action} onChange={e => setEditingTemplate(p => ({...p, rows: p.rows.map((r,idx) => idx===i?{...r,action:e.target.value}:r)}))} /></td>
+                    <td><textarea rows={2} value={row.testData} onChange={e => setEditingTemplate(p => ({...p, rows: p.rows.map((r,idx) => idx===i?{...r,testData:e.target.value}:r)}))} /></td>
+                    <td><textarea rows={2} value={row.expected} onChange={e => setEditingTemplate(p => ({...p, rows: p.rows.map((r,idx) => idx===i?{...r,expected:e.target.value}:r)}))} /></td>
+                    <td style={{textAlign:'center',verticalAlign:'middle'}}>
+                      <button className="remove-step-btn" onClick={() => setEditingTemplate(p => ({...p, rows: p.rows.filter((_,idx) => idx!==i)}))}><i className="ti ti-x" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button className="add-step-btn" onClick={() => setEditingTemplate(p => ({...p, rows: [...p.rows, {action:'',testData:'',expected:''}]}))}>+ Lépés hozzáadása</button>
+            <div className="modal-btns" style={{marginTop:'1rem'}}>
+              <button className="btn-cancel" onClick={() => setEditingTemplate(null)}>Mégse</button>
+              <button className="btn-save" onClick={saveEditTemplate}>Mentés</button>
             </div>
           </div>
         </div>
