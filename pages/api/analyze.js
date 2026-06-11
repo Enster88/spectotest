@@ -79,7 +79,7 @@ export default async function handler(req, res) {
 
   const countInstruction = generateMore > 0
     ? `Generate exactly ${generateMore} new test cases (TCM${startIdx} onwards).`
-    : 'Aim for 60-100 test cases for a complex spec.';
+    : 'Aim for 20-30 test cases. Focus on the most important scenarios only.';
 
   // Build diff section
   const diffSection = diffMode && oldText.trim().length > 20 ? `
@@ -100,7 +100,7 @@ Also return a "diffSummary" object with:
   try {
     const message = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 16000,
+      max_tokens: 8192,
       messages: [{
         role: 'user',
         content: `You are an expert QA engineer generating exhaustive regression test cases.
