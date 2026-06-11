@@ -18,7 +18,9 @@ export default function Home() {
     labels: '',
     owner: '',
     test_type: 'Functional',
-    test_set: ''
+    test_set: '',
+    precondition: 'The user is logged into the BackOffice as MER-Operator',
+    estimated_time: 'hh:mm'
   });
   const [showFixedFields, setShowFixedFields] = useState(false);
   const [templates, setTemplates] = useState([]);
@@ -29,7 +31,7 @@ export default function Home() {
   ] });
   const [addingTemplate, setAddingTemplate] = useState(false);
   const [templateBase64, setTemplateBase64] = useState(null);
-  const [language, setLanguage] = useState('hu');
+
   const [result, setResult] = useState(null);
   const [testCases, setTestCases] = useState([]);
   const [loadingText, setLoadingText] = useState('Elemezzük a specifikációt...');
@@ -79,7 +81,7 @@ export default function Home() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specText, language, stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)) })
+        body: JSON.stringify({ specText, stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)) })
       });
       const data = await res.json();
       clearInterval(interval);
@@ -345,14 +347,6 @@ export default function Home() {
 
           <div className="main">
             <div className="card">
-              <div className="card-title"><i className="ti ti-language" /> Nyelv</div>
-              <div className="lang-toggle">
-                <button className={`lang-btn ${language === 'hu' ? 'active' : ''}`} onClick={() => setLanguage('hu')}>🇭🇺 Magyar</button>
-                <button className={`lang-btn ${language === 'en' ? 'active' : ''}`} onClick={() => setLanguage('en')}>🇬🇧 English</button>
-              </div>
-            </div>
-
-            <div className="card">
               <div className="card-title"><i className="ti ti-file-text" /> Specifikáció</div>
               <div className={`upload-area ${specFile ? 'has-file' : ''}`}>
                 <input type="file" accept=".txt,.pdf,.md" onChange={handleSpecFile} />
@@ -576,7 +570,10 @@ export default function Home() {
                 {[
                   ['Folder', 'folder'], ['Component', 'component'],
                   ['Labels', 'labels'], ['Owner', 'owner'],
-                  ['Test set', 'test_set']
+                  ['Test set', 'test_set'],
+                  ['Precondition', 'precondition'],
+                  ['Estimated Time', 'estimated_time'],
+                  ['Coverage (Issues)', 'coverage_issues']
                 ].map(([label, key]) => (
                   <div key={key} className="field-group">
                     <label>{label}</label>

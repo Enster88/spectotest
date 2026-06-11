@@ -11,27 +11,25 @@ export default async function handler(req, res) {
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: 'Bejelentkezés szükséges.' });
 
-  const { specText, language = 'en', stepTemplates = [] } = req.body;
+  const { specText, stepTemplates = [] } = req.body;
 
   if (!specText || specText.trim().length < 20) {
     return res.status(400).json({ error: 'Túl rövid a specifikáció.' });
   }
 
-  const langNote = language === 'hu'
-    ? 'Generate all names, objectives, preconditions and test data in HUNGARIAN.'
-    : 'Generate all names, objectives, preconditions and test data in ENGLISH.';
-
-  // Build template list for AI
   let templatesSection = '';
   if (stepTemplates.length > 0) {
-    templatesSection = '\n\nAVAILABLE STEP TEMPLATES:\n';
+    templatesSection = '\n\nAVAILABLE STEP TEMPLATES (you MUST use these - generate test cases for EACH template that is relevant):\n';
     stepTemplates.forEach(t => {
       const steps = t.steps.map(s => typeof s === 'object' ? s.action : s);
-      templatesSection += `\nTemplate name: "${t.name}"\nSteps:\n${steps.map(s => `  - ${s}`).join('\n')}\n`;
+      templatesSection += `\nTemplate: "${t.name}"\nSteps:\n${steps.map(s => `  - ${s}`).join('\n')}\n`;
     });
-    templatesSection += `\nFor each test case, pick the most appropriate template from the list above based on what the test case is doing (creation, modification, validity change, etc.). Set "templateName" to exactly the template name you chose.`;
-  } else {
-    templatesSection = '\n\nNo step templates provided. Generate generic steps for each test case.';
+    templatesSection += `
+IMPORTANT: 
+- Generate test cases for EVERY template provided, not just the first one
+- If a template name suggests "modification" or "edit", generate test cases that test modifications
+- If a template name suggests "creation" or "new", generate test cases that test creation
+- Assign the exact template name to each test case's "templateName" field`;
   }
 
   try {
@@ -40,42 +38,58 @@ export default async function handler(req, res) {
       max_tokens: 16000,
       messages: [{
         role: 'user',
-        content: `You are an expert QA engineer. Analyze the specification and generate regression test cases.
+        content: `You are an expert QA engineer generating exhaustive regression test cases.
 
-${langNote}
+ALL text must be in ENGLISH ONLY - names, objectives, preconditions, test data, everything.
 
-RULES:
-1. NAME: "TCMx - [what is tested] - Positive" or "TCMx - [what is tested] - Negative"
-2. OBJECTIVE: Always "The goal of this test case is to verify that [full sentence]"
-3. LABELS: "HappyDay" for positive, "BadDay" for negative
-4. PRIORITY: "Critical", "High", "Medium", or "Low"
-5. TEST DATA: For the attributes step use format: "Important attributes:\\n- Attribute: Value"
-   For negative/missing: "Important attributes:\\n- Attribute:"
-6. TEMPLATE SELECTION: Choose the best matching template for each TC based on the action (create/modify/delete/etc.)
+NAMING RULES:
+- Format: "TCMx - Checking the [action] of a [entity] [condition] - Positive/Negative"
+- Example: "TCM1 - Checking the creation of a Consumer Physical Unit with category FIP when IC is filled - Positive"
+
+OBJECTIVE RULES:
+- Always: "The goal of this test case is to verify that [full sentence]"
+- Example: "The goal of this test case is to verify that the Consumer Physical unit can be created when the Physical Unit Category is FIP and the Installed Capacity is filled"
+
+PRECONDITION: Always in English, e.g. "The user is logged into the BackOffice as MER-Operator"
+
+LABELS: "HappyDay" for positive, "BadDay" for negative
+
+PRIORITY: "Critical", "High", "Medium", or "Low"
+
+TEST DATA RULES:
+- Only add testData when the spec provides specific values or combinations to test
+- Format: "Important attributes:\\n- Attribute: Value"
+- For missing/empty values: "Important attributes:\\n- Attribute:"
+- If no specific values needed, use empty string ""
+- Never write just "Important attributes:" with nothing after it
+
+EXHAUSTIVE COVERAGE RULES - this is critical:
+- Generate a SEPARATE test case for EVERY combination mentioned in the spec
+- For each entity type (Consumer, Producer, Transmission Line etc) × each category (FIT, FIP etc) = separate TC
+- For each boundary value = separate TC  
+- For each negative scenario = separate TC
+- For modifications: test each attribute change separately
+- Aim for 20-40 test cases for a complex spec, not just 10-15
+- MUST generate test cases for ALL provided templates, not just one
 ${templatesSection}
 
 Respond ONLY with valid JSON, no markdown.
 
-JSON structure:
 {
-  "summary": "brief summary",
+  "summary": "brief summary of spec and test approach",
   "testCases": [
     {
       "id": "TCM1",
-      "name": "TCM1 - [description] - Positive",
-      "templateName": "[exact template name or null if no templates]",
+      "name": "TCM1 - Checking the [action] of a [entity] - Positive",
+      "templateName": "[exact template name]",
       "priority": "Critical",
-      "preconditions": "The user is...",
+      "preconditions": "The user is logged into the BackOffice as MER-Operator",
       "objective": "The goal of this test case is to verify that...",
       "labels": "HappyDay",
-      "testData": "Important attributes:\\n- Attribute: Value"
+      "testData": "Important attributes:\\n- Category: FIP\\n- Installed Capacity: 10"
     }
   ]
 }
-
-Note: Only generate testData for the step that fills attributes. The steps themselves will come from the template.
-
-Generate 10-15 test cases covering happy path, negative, and boundary cases.
 
 SPECIFICATION:
 ${specText.substring(0, 7000)}`
@@ -99,24 +113,23 @@ ${specText.substring(0, 7000)}`
       result = JSON.parse(fixed);
     }
 
-    // Attach actual steps from templates to each TC
+    // Attach steps from templates
     if (stepTemplates.length > 0) {
       result.testCases = result.testCases.map(tc => {
         const template = stepTemplates.find(t => t.name === tc.templateName);
         if (template) {
           tc.steps = template.steps.map(s => {
             const action = typeof s === 'object' ? s.action : s;
-            // Inject testData into the "fills all attributes" step
-            const isDataStep = action.toLowerCase().includes('fills all') || action.toLowerCase().includes('fills the attributes');
+            const expected = typeof s === 'object' ? (s.expected || '') : '';
+            const isDataStep = action.toLowerCase().includes('fills all') || action.toLowerCase().includes('fills the attributes') || action.toLowerCase().includes('modifies the attributes');
             return {
               action,
-              expected: typeof s === 'object' ? (s.expected || '') : '',
-              testData: isDataStep ? (tc.testData || '') : ''
+              expected,
+              testData: isDataStep ? (tc.testData || '') : (typeof s === 'object' ? (s.testData || '') : '')
             };
           });
         } else {
-          // No template matched - generate generic steps
-          tc.steps = [{ action: 'Execute test case steps', expected: 'Steps completed successfully', testData: tc.testData || '' }];
+          tc.steps = [{ action: 'Execute test case steps according to the test case', expected: 'Steps completed successfully', testData: tc.testData || '' }];
         }
         return tc;
       });

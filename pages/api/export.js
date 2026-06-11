@@ -111,7 +111,11 @@ export default async function handler(req, res) {
           } else {
             switch (col.key) {
               case 'step':           rowData[col.key] = step.action || ''; break;
-              case 'test_data':      rowData[col.key] = step.testData || ''; break;
+              case 'test_data': {
+                const td = step.testData || '';
+                rowData[col.key] = (td.trim() === 'Important attributes:' || td.trim() === '') ? '' : td;
+                break;
+              }
               case 'expected_result':rowData[col.key] = step.expected || ''; break;
               case 'plain_text':     rowData[col.key] = ''; break;
               case 'bdd':            rowData[col.key] = ''; break;
