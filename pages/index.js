@@ -71,7 +71,7 @@ export default function Home() {
   };
 
   const analyze = async () => {
-    if (!specText.trim() || specText.trim().length < 20) {
+    if (!specFileBase64 && (!specText.trim() || specText.trim().length < 20)) {
       setError('Kérlek illessz be vagy tölts fel egy specifikációt.');
       return;
     }
@@ -88,7 +88,12 @@ export default function Home() {
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ specText, stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)) })
+        body: JSON.stringify({
+          specText,
+          specFileBase64: specFileBase64 || null,
+          specFileType: specFileType || null,
+          stepTemplates: templates.filter(t => selectedTemplates.includes(t.id))
+        })
       });
       const data = await res.json();
       clearInterval(interval);
@@ -249,6 +254,8 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           specText,
+          specFileBase64: specFileBase64 || null,
+          specFileType: specFileType || null,
           stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)),
           existingTestCases: testCases,
           generateMore: count
@@ -497,10 +504,10 @@ export default function Home() {
             <div className="card">
               <div className="card-title"><i className="ti ti-file-text" /> Specifikáció</div>
               <div className={`upload-area ${specFile ? 'has-file' : ''}`}>
-                <input type="file" accept=".txt,.pdf,.md" onChange={handleSpecFile} />
+                <input type="file" accept=".txt,.pdf,.md,.docx,.doc" onChange={handleSpecFile} />
                 <i className={specFile ? 'ti ti-circle-check' : 'ti ti-upload'} />
-                <p>{specFile ? specFile.name : 'Húzd ide a fájlt, vagy kattints'}</p>
-                <span>.txt, .pdf, .md – max 10 MB</span>
+                <p>{specFile ? `✓ ${specFile.name}` : 'Húzd ide a fájlt, vagy kattints'}</p>
+                <span>.txt, .pdf, .docx, .md – max 10 MB</span>
               </div>
               <div className="divider"><span>vagy illeszd be közvetlenül</span></div>
               <textarea

@@ -11,9 +11,30 @@ export default async function handler(req, res) {
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: 'Bejelentkezés szükséges.' });
 
-  const { specText, stepTemplates = [], existingTestCases = [], generateMore = 0 } = req.body;
+  const { specText, specFileBase64, specFileType, stepTemplates = [], existingTestCases = [], generateMore = 0 } = req.body;
 
-  if (!specText || specText.trim().length < 20) {
+  // Extract text from file if provided
+  let finalText = specText || '';
+  if (specFileBase64 && specFileType) {
+    try {
+      if (specFileType === 'pdf') {
+        const pdfParse = (await import('pdf-parse')).default;
+        const buffer = Buffer.from(specFileBase64, 'base64');
+        const data = await pdfParse(buffer);
+        finalText = data.text;
+      } else if (specFileType === 'docx') {
+        const mammoth = (await import('mammoth')).default;
+        const buffer = Buffer.from(specFileBase64, 'base64');
+        const result = await mammoth.extractRawText({ buffer });
+        finalText = result.value;
+      }
+    } catch(e) {
+      console.error('File extraction error:', e);
+      return res.status(400).json({ error: 'Nem sikerült kiolvasni a fájlt.' });
+    }
+  }
+
+  if (!finalText || finalText.trim().length < 20) {
     return res.status(400).json({ error: 'Túl rövid a specifikáció.' });
   }
 
@@ -92,7 +113,7 @@ Respond ONLY with valid JSON:
 }
 
 SPECIFICATION:
-${specText.substring(0, generateMore > 0 ? 5000 : 7000)}`
+${finalText.substring(0, generateMore > 0 ? 5000 : 7000)}`
       }]
     });
 
