@@ -81,6 +81,29 @@ export default function Home() {
     reader.readAsDataURL(file);
   };
 
+  const handleOldSpecFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setOldSpecFile(file);
+    const isPdf = file.type === 'application/pdf';
+    const isDocx = file.name.endsWith('.docx') || file.name.endsWith('.doc');
+    if (isPdf || isDocx) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setOldSpecFileBase64(ev.target.result.split(',')[1]);
+        setOldSpecFileType(isPdf ? 'pdf' : 'docx');
+        setOldSpecText('');
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setOldSpecFileBase64(null);
+      setOldSpecFileType(null);
+      const reader = new FileReader();
+      reader.onload = (ev) => setOldSpecText(ev.target.result);
+      reader.readAsText(file);
+    }
+  };
+
   const analyze = async () => {
     if (!specFileBase64 && (!specText.trim() || specText.trim().length < 20)) {
       setError('Kérlek illessz be vagy tölts fel egy specifikációt.');
@@ -103,6 +126,10 @@ export default function Home() {
           specText,
           specFileBase64: specFileBase64 || null,
           specFileType: specFileType || null,
+          oldSpecText: oldSpecText || null,
+          oldSpecFileBase64: oldSpecFileBase64 || null,
+          oldSpecFileType: oldSpecFileType || null,
+          diffMode: showDiffMode,
           stepTemplates: templates.filter(t => selectedTemplates.includes(t.id))
         })
       });
@@ -267,6 +294,10 @@ export default function Home() {
           specText,
           specFileBase64: specFileBase64 || null,
           specFileType: specFileType || null,
+          oldSpecText: oldSpecText || null,
+          oldSpecFileBase64: oldSpecFileBase64 || null,
+          oldSpecFileType: oldSpecFileType || null,
+          diffMode: showDiffMode,
           stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)),
           existingTestCases: testCases,
           generateMore: count
@@ -426,6 +457,14 @@ export default function Home() {
         .field-group label { font-size: 11px; color: var(--muted); display: block; margin-bottom: .3rem; font-weight: 500; letter-spacing: .5px; text-transform: uppercase; }
         .field-group input, .field-group select { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; }
         .field-group input:focus, .field-group select:focus { outline: none; border-color: var(--accent); }
+        .diff-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; margin-right: 6px; }
+        .diff-new { background: #0F2A1F; color: var(--green); border: 1px solid var(--green); }
+        .diff-modified { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
+        .diff-deleted { background: var(--red-bg); color: var(--red); border: 1px solid var(--red); }
+        .diff-summary { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1rem; }
+        .diff-summary h4 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: .75rem; }
+        .diff-item { font-size: 13px; color: var(--muted); padding: .3rem 0; border-bottom: 1px solid var(--border); line-height: 1.5; }
+        .diff-item:last-child { border-bottom: none; }
         .project-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 100; display: flex; align-items: center; justify-content: center; }
         .project-modal-inner { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; width: 520px; max-height: 80vh; overflow-y: auto; }
         .project-modal-inner h3 { font-family: 'Space Grotesk', sans-serif; font-size: 18px; margin-bottom: 1rem; }
@@ -536,6 +575,33 @@ export default function Home() {
                 <p>{templateFile ? templateFile.name : 'Töltsd fel a saját Zephyr sablonod'}</p>
                 <span>.xlsx, .xls – ha nincs sablon, alapértelmezett formátumot használunk</span>
               </div>
+            </div>
+
+            <div className="card">
+              <div className="card-title" style={{cursor:'pointer'}} onClick={() => setShowDiffMode(!showDiffMode)}>
+                <i className="ti ti-git-diff" /> Spec összehasonlítás (diff mód)
+                <span style={{marginLeft:'auto',fontSize:'11px',color:showDiffMode?'var(--green)':'var(--muted)'}}>
+                  {showDiffMode ? '✓ Bekapcsolva' : 'Kikapcsolva – kattints a bekapcsoláshoz'}
+                </span>
+              </div>
+              {showDiffMode && (
+                <div>
+                  <p style={{fontSize:'13px',color:'var(--muted)',marginBottom:'.75rem',lineHeight:'1.6'}}>
+                    Töltsd fel a <strong style={{color:'var(--text)'}}>régi spec verziót</strong> – az AI csak a változásokhoz generál TC-ket.
+                  </p>
+                  <div className={`upload-area ${oldSpecFile ? 'has-file' : ''}`}>
+                    <input type="file" accept=".txt,.pdf,.md,.docx,.doc" onChange={handleOldSpecFile} />
+                    <i className={oldSpecFile ? 'ti ti-circle-check' : 'ti ti-history'} />
+                    <p>{oldSpecFile ? `✓ ${oldSpecFile.name}` : 'Régi spec verzió feltöltése'}</p>
+                    <span>.txt, .pdf, .docx – az előző verzió</span>
+                  </div>
+                  {oldSpecFile && (
+                    <div style={{display:'flex',alignItems:'center',gap:'8px',marginTop:'.5rem',fontSize:'12px',color:'var(--green)'}}>
+                      <i className="ti ti-check" /> Diff mód aktív – csak a változásokhoz generál TC-ket
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {isSignedIn && (
@@ -659,6 +725,20 @@ export default function Home() {
           </div>
 
           {result.summary && <div className="review-summary">{result.summary}</div>}
+          {result.diffSummary && (
+            <div className="diff-summary">
+              <h4><i className="ti ti-git-diff" style={{marginRight:'6px'}} />Spec változások</h4>
+              {result.diffSummary.added?.length > 0 && result.diffSummary.added.map((item, i) => (
+                <div key={i} className="diff-item"><span className="diff-badge diff-new">+ Új</span>{item}</div>
+              ))}
+              {result.diffSummary.modified?.length > 0 && result.diffSummary.modified.map((item, i) => (
+                <div key={i} className="diff-item"><span className="diff-badge diff-modified">~ Módosult</span>{item}</div>
+              ))}
+              {result.diffSummary.deleted?.length > 0 && result.diffSummary.deleted.map((item, i) => (
+                <div key={i} className="diff-item"><span className="diff-badge diff-deleted">- Törölt</span>{item}</div>
+              ))}
+            </div>
+          )}
 
           <div style={{ fontSize: '13px', color: 'var(--muted)', marginBottom: '1rem' }}>
             <strong style={{ color: 'var(--accent-light)' }}>{testCases.filter(t => t.selected).length}</strong> / {testCases.length} teszteset kijelölve

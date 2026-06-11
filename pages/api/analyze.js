@@ -3,7 +3,22 @@ import { getAuth } from '@clerk/nextjs/server';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export const config = { api: { bodyParser: { sizeLimit: '10mb' } } };
+export const config = { api: { bodyParser: { sizeLimit: '20mb' } } };
+
+async function extractFileText(base64, fileType) {
+  if (!base64 || !fileType) return null;
+  const buffer = Buffer.from(base64, 'base64');
+  if (fileType === 'pdf') {
+    const pdfParse = (await import('pdf-parse')).default;
+    const data = await pdfParse(buffer);
+    return data.text;
+  } else if (fileType === 'docx') {
+    const mammoth = (await import('mammoth')).default;
+    const result = await mammoth.extractRawText({ buffer });
+    return result.value;
+  }
+  return null;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -11,26 +26,20 @@ export default async function handler(req, res) {
   const { userId } = getAuth(req);
   if (!userId) return res.status(401).json({ error: 'Bejelentkezés szükséges.' });
 
-  const { specText, specFileBase64, specFileType, stepTemplates = [], existingTestCases = [], generateMore = 0 } = req.body;
+  const {
+    specText, specFileBase64, specFileType,
+    oldSpecText, oldSpecFileBase64, oldSpecFileType,
+    diffMode = false,
+    stepTemplates = [], existingTestCases = [], generateMore = 0
+  } = req.body;
 
-  // Extract text from file if provided
+  // Extract new spec text
   let finalText = specText || '';
   if (specFileBase64 && specFileType) {
     try {
-      if (specFileType === 'pdf') {
-        const pdfParse = (await import('pdf-parse')).default;
-        const buffer = Buffer.from(specFileBase64, 'base64');
-        const data = await pdfParse(buffer);
-        finalText = data.text;
-      } else if (specFileType === 'docx') {
-        const mammoth = (await import('mammoth')).default;
-        const buffer = Buffer.from(specFileBase64, 'base64');
-        const result = await mammoth.extractRawText({ buffer });
-        finalText = result.value;
-      }
+      finalText = await extractFileText(specFileBase64, specFileType) || finalText;
     } catch(e) {
-      console.error('File extraction error:', e);
-      return res.status(400).json({ error: 'Nem sikerült kiolvasni a fájlt.' });
+      return res.status(400).json({ error: 'Nem sikerült kiolvasni az új spec fájlt.' });
     }
   }
 
@@ -38,30 +47,55 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Túl rövid a specifikáció.' });
   }
 
+  // Extract old spec text for diff mode
+  let oldText = oldSpecText || '';
+  if (diffMode && oldSpecFileBase64 && oldSpecFileType) {
+    try {
+      oldText = await extractFileText(oldSpecFileBase64, oldSpecFileType) || oldText;
+    } catch(e) {
+      return res.status(400).json({ error: 'Nem sikerült kiolvasni a régi spec fájlt.' });
+    }
+  }
+
+  // Build templates section
   let templatesSection = '';
   if (stepTemplates.length > 0) {
-    templatesSection = '\n\nAVAILABLE STEP TEMPLATES (you MUST use these - generate test cases for EACH template that is relevant):\n';
+    templatesSection = '\n\nAVAILABLE STEP TEMPLATES:\n';
     stepTemplates.forEach(t => {
       const steps = t.steps.map(s => typeof s === 'object' ? s.action : s);
       templatesSection += `\nTemplate: "${t.name}"\nSteps:\n${steps.map(s => `  - ${s}`).join('\n')}\n`;
     });
-    templatesSection += `\nIMPORTANT: 
-- Generate test cases for EVERY template provided, not just the first one
-- Assign the exact template name to each test case's "templateName" field`;
+    templatesSection += '\nIMPORTANT: Assign exact template name to each TC. Use ALL templates proportionally.';
   }
 
-  // Build existing TCs context for generateMore
+  // Build existing TCs context
   let existingContext = '';
   const startIdx = existingTestCases.length + 1;
   if (generateMore > 0 && existingTestCases.length > 0) {
-    existingContext = `\n\nALREADY COVERED TEST CASES (do NOT duplicate these, generate NEW ones covering gaps):\n`;
+    existingContext = `\n\nALREADY COVERED (do NOT duplicate):\n`;
     existingContext += existingTestCases.map(tc => `- ${tc.name}`).join('\n');
-    existingContext += `\n\nGenerate exactly ${generateMore} NEW test cases starting from TCM${startIdx}.\nFocus on combinations, boundary values, and scenarios NOT yet covered above.`;
+    existingContext += `\n\nGenerate exactly ${generateMore} NEW test cases starting from TCM${startIdx}.`;
   }
 
   const countInstruction = generateMore > 0
     ? `Generate exactly ${generateMore} new test cases (TCM${startIdx} onwards).`
     : 'Aim for 60-100 test cases for a complex spec.';
+
+  // Build diff section
+  const diffSection = diffMode && oldText.trim().length > 20 ? `
+
+DIFF MODE - SPEC COMPARISON:
+Old specification:
+${oldText.substring(0, 3000)}
+
+New specification changes to analyze:
+Focus ONLY on what is NEW or MODIFIED between old and new spec.
+Generate test cases ONLY for the changed parts.
+Also return a "diffSummary" object with:
+- added: array of new requirements/rules added
+- modified: array of changed requirements/rules  
+- deleted: array of removed requirements/rules
+` : '';
 
   try {
     const message = await client.messages.create({
@@ -71,38 +105,42 @@ export default async function handler(req, res) {
         role: 'user',
         content: `You are an expert QA engineer generating exhaustive regression test cases.
 
-ALL text must be in ENGLISH ONLY.
+ALL text in ENGLISH ONLY.
 
 NAMING: "TCMx - Checking the [action] of a [EntityType] [condition] - Positive/Negative"
 OBJECTIVE: "The goal of this test case is to verify that [full sentence]"
-PRECONDITION: English only, e.g. "The user is logged into the BackOffice as MER-Operator"
-LABELS: "HappyDay" for positive, "BadDay" for negative
-PRIORITY: "Critical", "High", "Medium", or "Low"
+PRECONDITION: English, e.g. "The user is logged into the BackOffice as MER-Operator"
+LABELS: "HappyDay" positive, "BadDay" negative
+PRIORITY: "Critical", "High", "Medium", "Low"
 
 TEST DATA:
-- Only add testData when spec provides specific values
+- Only when spec provides specific values
 - Format: "Important attributes:\\n- Attribute: Value"
-- For missing values: "Important attributes:\\n- Attribute:"
-- If no specific values needed, use empty string ""
+- Missing: "Important attributes:\\n- Attribute:"
+- Empty string if no specific values needed
 
 EXHAUSTIVE COVERAGE:
-- Identify ALL entity types × ALL categories = separate TC per combination
-- Include entity type in name: "Consumer Physical Unit", "Producer Physical Unit"
-- For DELETED validations: generate TCs verifying previously forbidden values NOW WORK
-- Boundary values: min-1(invalid), min(valid), max(valid), max+1(invalid), empty, special chars
-- Modifications: each attribute change separately, each direction (A→B and B→A)
+- Entity types × categories = separate TC per combination
+- Include entity type in name
+- Deleted validations: TCs verifying previously forbidden values NOW WORK
+- Boundary values: min-1(invalid), min(valid), max(valid), max+1(invalid)
 - ${countInstruction}
-- MUST use ALL provided templates proportionally
-${templatesSection}${existingContext}
+- Use ALL templates proportionally
+${templatesSection}${existingContext}${diffSection}
 
 Respond ONLY with valid JSON:
 {
   "summary": "brief summary",
+  "diffSummary": {
+    "added": ["new rule 1", "new rule 2"],
+    "modified": ["changed rule 1"],
+    "deleted": ["removed rule 1"]
+  },
   "testCases": [
     {
       "id": "TCM${startIdx}",
       "name": "TCM${startIdx} - Checking the...",
-      "templateName": "[exact template name]",
+      "templateName": "[exact template name or null]",
       "priority": "Critical",
       "preconditions": "The user is logged into the BackOffice as MER-Operator",
       "objective": "The goal of this test case is to verify that...",
@@ -111,6 +149,8 @@ Respond ONLY with valid JSON:
     }
   ]
 }
+
+Note: diffSummary can be null if not in diff mode.
 
 SPECIFICATION:
 ${finalText.substring(0, generateMore > 0 ? 5000 : 7000)}`
@@ -143,12 +183,10 @@ ${finalText.substring(0, generateMore > 0 ? 5000 : 7000)}`
             const action = typeof s === 'object' ? s.action : s;
             const expected = typeof s === 'object' ? (s.expected || '') : '';
             const staticData = typeof s === 'object' ? (s.testData || '') : '';
-            const isDataStep = action.toLowerCase().includes('fills all') || action.toLowerCase().includes('fills the attributes') || action.toLowerCase().includes('modifies the attributes');
-            return {
-              action,
-              expected,
-              testData: isDataStep ? (tc.testData || '') : staticData
-            };
+            const isDataStep = action.toLowerCase().includes('fills all') ||
+              action.toLowerCase().includes('fills the attributes') ||
+              action.toLowerCase().includes('modifies the attributes');
+            return { action, expected, testData: isDataStep ? (tc.testData || '') : staticData };
           });
         } else {
           tc.steps = [{ action: 'Execute test case steps', expected: 'Steps completed successfully', testData: tc.testData || '' }];
