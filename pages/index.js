@@ -67,9 +67,24 @@ export default function Home() {
     const file = e.target.files[0];
     if (!file) return;
     setSpecFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setSpecText(ev.target.result);
-    reader.readAsText(file);
+    const isPdf = file.type === 'application/pdf';
+    const isDocx = file.name.endsWith('.docx') || file.name.endsWith('.doc');
+    if (isPdf || isDocx) {
+      setSpecFileBase64(null);
+      setSpecFileType(isPdf ? 'pdf' : 'docx');
+      setSpecText('');
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setSpecFileBase64(ev.target.result.split(',')[1]);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setSpecFileBase64(null);
+      setSpecFileType(null);
+      const reader = new FileReader();
+      reader.onload = (ev) => setSpecText(ev.target.result);
+      reader.readAsText(file);
+    }
   };
 
   const handleTemplateFile = (e) => {
@@ -105,7 +120,7 @@ export default function Home() {
   };
 
   const analyze = async () => {
-    if (!specFileBase64 && (!specText.trim() || specText.trim().length < 20)) {
+    if (!specFileBase64 && (!specText || specText.trim().length < 20)) {
       setError('Kérlek illessz be vagy tölts fel egy specifikációt.');
       return;
     }
