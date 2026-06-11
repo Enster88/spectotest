@@ -38,7 +38,7 @@ export default async function handler(req, res) {
     console.log('Starting analysis, text length:', specText.length);
     const message = await client.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 8096,
+      max_tokens: 16000,
       messages: [{
         role: 'user',
         content: `Te egy tapasztalt QA mérnök vagy. Elemezd az alábbi szoftver specifikációt és generálj regressziós teszteset ötleteket belőle.
@@ -86,7 +86,21 @@ ${specText.substring(0, 7000)}${templatesContext}`
     });
 
     const raw = message.content.map(b => b.text || '').join('').replace(/```json|```/g, '').trim();
-    const result = JSON.parse(raw);
+    // Try to fix truncated JSON by finding last complete object
+    let jsonStr = raw;
+    if (!jsonStr.endsWith('}')) {
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (lastBrace > 0) {
+        // Find the closing of testCases array
+        jsonStr = jsonStr.substring(0, lastBrace + 1);
+        // Try to close the structure
+        const openBraces = (jsonStr.match(/{/g) || []).length;
+        const closeBraces = (jsonStr.match(/}/g) || []).length;
+        for (let i = 0; i < openBraces - closeBraces; i++) jsonStr += '}';
+        if (!jsonStr.includes('"testCases"')) jsonStr = raw;
+      }
+    }
+    const result = JSON.parse(jsonStr);
     res.status(200).json(result);
   } catch (e) {
     console.error('Analysis error:', e.message, e.status);
