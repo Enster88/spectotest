@@ -77,7 +77,15 @@ export default async function handler(req, res) {
     let alt = false;
     let rowExcel = 2;
 
-    testCases.forEach((tc, tcIdx) => {
+    // Filter out TCs with no real steps
+    const validTCs = testCases.filter(tc => {
+      if (!tc.steps || tc.steps.length === 0) return false;
+      const firstStep = typeof tc.steps[0] === 'object' ? tc.steps[0].action : tc.steps[0];
+      if (firstStep === 'Execute test case steps') return false;
+      return true;
+    });
+
+    validTCs.forEach((tc, tcIdx) => {
       const rawSteps = Array.isArray(tc.steps) ? tc.steps : [{ action: tc.steps || '', expected: '', testData: '' }];
       const steps = rawSteps.map(s => typeof s === 'object' ? s : { action: s, expected: '', testData: '' });
       const nSteps = steps.length;
@@ -153,7 +161,7 @@ export default async function handler(req, res) {
 
         rowExcel++;
       });
-    });
+    }); // end validTCs
 
     const buffer = await wb.xlsx.writeBuffer();
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

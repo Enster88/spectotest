@@ -33,10 +33,10 @@ export default async function handler(req, res) {
 
   if (req.method === 'PUT') {
     const { id } = req.query;
-    const { name, description, steps } = req.body;
+    const { name, description, steps, disableTestData, flexibleMode } = req.body;
     const { data, error } = await supabase
       .from('step_templates')
-      .update({ name, description, steps })
+      .update({ name, description, steps, disable_test_data: disableTestData || false, flexible_mode: flexibleMode || false })
       .eq('id', id).eq('user_id', userId)
       .select().single();
     if (error) return res.status(500).json({ error: error.message });

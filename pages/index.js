@@ -30,6 +30,14 @@ export default function Home() {
   const [showSaveProject, setShowSaveProject] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [generatingMore, setGeneratingMore] = useState(false);
+  const [coverageMode, setCoverageMode] = useState('regression');
+  const [autoIterating, setAutoIterating] = useState(false);
+  const [coverageMap, setCoverageMap] = useState(null);
+  const [loadingCoverage, setLoadingCoverage] = useState(false);
+  const [showCoverage, setShowCoverage] = useState(false);
+  const [preconditionInput, setPreconditionInput] = useState({ entity: '', state: '', tcType: 'positive' });
+  const [generatingPrecondition, setGeneratingPrecondition] = useState(false);
+  const [showPreconditionBuilder, setShowPreconditionBuilder] = useState(false);
   const [showDiffMode, setShowDiffMode] = useState(false);
   const [specFileBase64, setSpecFileBase64] = useState(null);
   const [specFileType, setSpecFileType] = useState(null);
@@ -52,7 +60,7 @@ export default function Home() {
   const [templates, setTemplates] = useState([]);
   const [showTemplates, setShowTemplates] = useState(false);
   const [selectedTemplates, setSelectedTemplates] = useState([]);
-  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', rows: [
+  const [newTemplate, setNewTemplate] = useState({ name: '', description: '', disableTestData: false, flexibleMode: false, rows: [
     { action: '', testData: '', expected: '' }
   ] });
   const [addingTemplate, setAddingTemplate] = useState(false);
@@ -153,6 +161,7 @@ export default function Home() {
           oldSpecFileBase64: oldSpecFileBase64 || null,
           oldSpecFileType: oldSpecFileType || null,
           diffMode: showDiffMode,
+          coverageMode,
           stepTemplates: templates.filter(t => selectedTemplates.includes(t.id))
         })
       });
@@ -190,12 +199,12 @@ export default function Home() {
     const res = await fetch('/api/templates', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newTemplate.name, description: newTemplate.description, steps })
+      body: JSON.stringify({ name: newTemplate.name, description: newTemplate.description, steps, disableTestData: newTemplate.disableTestData, flexibleMode: newTemplate.flexibleMode })
     });
     const data = await res.json();
     if (!data.error) {
       setTemplates(prev => [data, ...prev]);
-      setNewTemplate({ name: '', description: '', rows: [{ action: '', testData: '', expected: '' }] });
+      setNewTemplate({ name: '', description: '', disableTestData: false, flexibleMode: false, rows: [{ action: '', testData: '', expected: '' }] });
       setAddingTemplate(false);
     }
   };
@@ -282,6 +291,8 @@ export default function Home() {
       id: t.id,
       name: t.name,
       description: t.description || '',
+      disableTestData: t.disable_test_data || false,
+      flexibleMode: t.flexible_mode || false,
       rows: t.steps.map(s => ({
         action: typeof s === 'object' ? s.action : s,
         testData: typeof s === 'object' ? (s.testData || '') : '',
@@ -298,13 +309,102 @@ export default function Home() {
     const res = await fetch(`/api/templates?id=${editingTemplate.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: editingTemplate.name, description: editingTemplate.description, steps })
+      body: JSON.stringify({ name: editingTemplate.name, description: editingTemplate.description, steps, disableTestData: editingTemplate.disableTestData, flexibleMode: editingTemplate.flexibleMode })
     });
     const data = await res.json();
     if (!data.error) {
       setTemplates(prev => prev.map(t => t.id === data.id ? data : t));
       setEditingTemplate(null);
     }
+  };
+
+  const fetchCoverageMap = async (tcs) => {
+    setLoadingCoverage(true);
+    try {
+      const res = await fetch('/api/coverage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ testCases: tcs })
+      });
+      const data = await res.json();
+      if (!data.error) { setCoverageMap(data); setShowCoverage(true); }
+    } catch(e) { console.error(e); }
+    finally { setLoadingCoverage(false); }
+  };
+
+  const generatePrecondition = async () => {
+    if (!preconditionInput.entity) return;
+    setGeneratingPrecondition(true);
+    try {
+      const res = await fetch('/api/precondition', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          entityType: preconditionInput.entity,
+          state: preconditionInput.state,
+          tcType: preconditionInput.tcType
+        })
+      });
+      const data = await res.json();
+      if (data.precondition) {
+        setFixedFields(p => ({ ...p, precondition: data.precondition }));
+        setShowPreconditionBuilder(false);
+      }
+    } catch(e) { console.error(e); }
+    finally { setGeneratingPrecondition(false); }
+  };
+
+  const autoGenerateUntilComplete = async () => {
+    if (coverageMode === 'smoke') return; // smoke doesn't need iteration
+    setAutoIterating(true);
+    let iterations = 0;
+    const maxIterations = coverageMode === 'regression' ? 6 : 3;
+
+    const runIteration = async (currentTCs) => {
+      if (iterations >= maxIterations) {
+        setAutoIterating(false);
+        return;
+      }
+      iterations++;
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            specText,
+            specFileBase64: specFileBase64 || null,
+            specFileType: specFileType || null,
+            coverageMode,
+            stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)),
+            existingTestCases: currentTCs,
+            generateMore: coverageMode === 'regression' ? 25 : 15
+          })
+        });
+        const data = await res.json();
+        if (data.error || !data.testCases?.length) {
+          setAutoIterating(false);
+          return;
+        }
+        const newTCs = data.testCases.map(tc => ({ ...tc, selected: true, isNew: true }));
+        const allTCs = [...currentTCs, ...newTCs];
+        setTestCases(allTCs);
+
+        // Check if AI indicates coverage is complete
+        const summary = (data.summary || '').toLowerCase();
+        const isDone = summary.includes('complete') || summary.includes('all combinations') ||
+          summary.includes('fully covered') || newTCs.length < 5;
+
+        if (isDone) {
+          setAutoIterating(false);
+        } else {
+          await runIteration(allTCs);
+        }
+      } catch(e) {
+        setAutoIterating(false);
+      }
+    };
+
+    await runIteration(testCases);
   };
 
   const generateMoreTCs = async (count) => {
@@ -321,6 +421,7 @@ export default function Home() {
           oldSpecFileBase64: oldSpecFileBase64 || null,
           oldSpecFileType: oldSpecFileType || null,
           diffMode: showDiffMode,
+          coverageMode,
           stepTemplates: templates.filter(t => selectedTemplates.includes(t.id)),
           existingTestCases: testCases,
           generateMore: count
@@ -480,6 +581,21 @@ export default function Home() {
         .field-group label { font-size: 11px; color: var(--muted); display: block; margin-bottom: .3rem; font-weight: 500; letter-spacing: .5px; text-transform: uppercase; }
         .field-group input, .field-group select { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; }
         .field-group input:focus, .field-group select:focus { outline: none; border-color: var(--accent); }
+        .coverage-map { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1.25rem; }
+        .coverage-map h4 { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 1rem; display: flex; align-items: center; gap: 8px; }
+        .coverage-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: .75rem; }
+        .coverage-table th { background: var(--surface2); color: var(--muted); padding: 6px 8px; text-align: center; border: 1px solid var(--border); font-weight: 500; }
+        .coverage-table td { border: 1px solid var(--border); padding: 5px 8px; text-align: center; }
+        .coverage-table td:first-child { text-align: left; font-weight: 500; color: var(--text); background: var(--surface2); }
+        .cov-full { background: #0F2A1F; color: var(--green); border-radius: 4px; padding: 2px 6px; }
+        .cov-partial { background: var(--yellow-bg); color: var(--yellow); border-radius: 4px; padding: 2px 6px; }
+        .cov-empty { background: var(--red-bg); color: var(--red); border-radius: 4px; padding: 2px 6px; }
+        .cov-na { color: #4B5563; }
+        .coverage-missing { font-size: 12px; color: var(--red); margin-top: .5rem; }
+        .coverage-stats { display: flex; gap: 1rem; font-size: 12px; color: var(--muted); margin-top: .75rem; flex-wrap: wrap; }
+        .coverage-stats span strong { color: var(--text); }
+        .precondition-builder { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-top: .5rem; }
+        .precondition-builder input, .precondition-builder select { width: 100%; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; color: var(--text); font-family: 'Inter', sans-serif; margin-bottom: .5rem; }
         .diff-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 6px; font-size: 12px; font-weight: 500; margin-right: 6px; }
         .diff-new { background: #0F2A1F; color: var(--green); border: 1px solid var(--green); }
         .diff-modified { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow); }
@@ -673,6 +789,18 @@ export default function Home() {
                         ))}
                       </tbody>
                     </table>
+                    <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'var(--muted)',cursor:'pointer',margin:'.5rem 0'}}>
+                      <input type="checkbox" checked={newTemplate.disableTestData}
+                        onChange={e => setNewTemplate(p => ({...p, disableTestData: e.target.checked}))}
+                        style={{width:'16px',height:'16px',cursor:'pointer'}} />
+                      Test Data tiltása – ne generáljon AI test data-t ehhez a sablonhoz
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'var(--muted)',cursor:'pointer',margin:'.5rem 0'}}>
+                      <input type="checkbox" checked={newTemplate.flexibleMode}
+                        onChange={e => setNewTemplate(p => ({...p, flexibleMode: e.target.checked}))}
+                        style={{width:'16px',height:'16px',cursor:'pointer'}} />
+                      Félszabad mód – AI módosíthatja a lépések elvárt eredményeit és részleteit a TC tartalmától függően
+                    </label>
                     <button className="add-step-btn" onClick={addStepRow}>+ Lépés hozzáadása</button>
                     <div className="form-btns">
                       <button className="btn-cancel" onClick={() => setAddingTemplate(false)}>Mégse</button>
@@ -693,7 +821,7 @@ export default function Home() {
                           </div>
                         </div>
                         {t.description && <div style={{fontSize:'12px',color:'var(--muted)',marginTop:'2px'}}>{t.description}</div>}
-                        <div className="template-steps">{t.steps.length} lépés · {selectedTemplates.includes(t.id) ? '✓ Kiválasztva' : 'Kattints a kiválasztáshoz'}</div>
+                        <div className="template-steps">{t.steps.length} lépés · {selectedTemplates.includes(t.id) ? '✓ Kiválasztva' : 'Kattints a kiválasztáshoz'}{t.disable_test_data ? ' · 🚫 Test Data tiltva' : ''}{t.flexible_mode ? ' · 🔄 Félszabad' : ''}</div>
                       </div>
                     ))}
                   </div>
@@ -705,6 +833,26 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            <div className="card">
+              <div className="card-title"><i className="ti ti-target" /> Lefedettség mód</div>
+              <div className="lang-toggle">
+                <button className={`lang-btn ${coverageMode === 'smoke' ? 'active' : ''}`} onClick={() => setCoverageMode('smoke')}>
+                  🔥 Smoke
+                </button>
+                <button className={`lang-btn ${coverageMode === 'semi_regression' ? 'active' : ''}`} onClick={() => setCoverageMode('semi_regression')}>
+                  ⚡ Semi-regression
+                </button>
+                <button className={`lang-btn ${coverageMode === 'regression' ? 'active' : ''}`} onClick={() => setCoverageMode('regression')}>
+                  🔬 Regression
+                </button>
+              </div>
+              <p style={{fontSize:'12px',color:'var(--muted)',marginTop:'.5rem',lineHeight:'1.6'}}>
+                {coverageMode === 'smoke' && '5-15 TC · 1 entitás · happy path + 1 negatív eset per szabály'}
+                {coverageMode === 'semi_regression' && '20-40 TC · 1 entitás × minden kategória · minden pozitív/negatív · boundary értékek'}
+                {coverageMode === 'regression' && '50-100 TC · minden entitás × minden kategória kombináció · teljes lefedettség'}
+              </p>
+            </div>
 
             {!isSignedIn ? (
               <SignUpButton mode="modal">
@@ -741,13 +889,65 @@ export default function Home() {
               <button className="back-btn" onClick={() => { setStep('input'); setError(''); }}>← Vissza</button>
               <button className="btn-ghost" onClick={selectAll}>Összes kijelölése</button>
               <button className="btn-ghost" onClick={deselectAll}>Összes törlése</button>
-              <button className="btn-ghost" onClick={() => generateMoreTCs(20)} disabled={generatingMore} style={{borderColor:'var(--green)',color:'var(--green)'}}>
+              <button className="btn-ghost" onClick={() => generateMoreTCs(20)} disabled={generatingMore || autoIterating} style={{borderColor:'var(--green)',color:'var(--green)'}}>
                 {generatingMore ? '⏳ Generálás...' : '+ 20 új TC'}
+              </button>
+              {coverageMode !== 'smoke' && (
+                <button className="btn-ghost" onClick={autoGenerateUntilComplete} disabled={generatingMore || autoIterating} style={{borderColor:'var(--accent-light)',color:'var(--accent-light)'}}>
+                  {autoIterating ? '🔄 Auto-generálás...' : '🎯 Teljes lefedettség'}
+                </button>
+              )}
+              <button className="btn-ghost" onClick={() => fetchCoverageMap(testCases)} disabled={loadingCoverage} style={{borderColor:'var(--teal-mid)',color:'var(--teal-mid)'}}>
+                {loadingCoverage ? '⏳' : '📊 Lefedettség térkép'}
               </button>
             </div>
           </div>
 
           {result.summary && <div className="review-summary">{result.summary}</div>}
+          {/* Coverage Map */}
+          {showCoverage && coverageMap && (
+            <div className="coverage-map">
+              <h4><i className="ti ti-table" /> Lefedettség térkép
+                <button className="toggle-link" style={{marginLeft:'auto'}} onClick={() => setShowCoverage(false)}>Elrejtés ▲</button>
+              </h4>
+              <table className="coverage-table">
+                <thead>
+                  <tr>
+                    <th>Entitás</th>
+                    {coverageMap.dimensions?.cols?.map(col => <th key={col}>{col}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {coverageMap.dimensions?.rows?.map(row => (
+                    <tr key={row}>
+                      <td>{row}</td>
+                      {coverageMap.dimensions?.cols?.map(col => {
+                        const tcs = coverageMap.matrix?.[row]?.[col] || [];
+                        if (tcs.length === 0) return <td key={col}><span className="cov-empty">✗</span></td>;
+                        if (tcs.length === 1) return <td key={col}><span className="cov-partial">{tcs.length}</span></td>;
+                        return <td key={col}><span className="cov-full">{tcs.length}</span></td>;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {coverageMap.missing?.length > 0 && (
+                <div className="coverage-missing">
+                  {coverageMap.missing.map((m, i) => <div key={i}>⚠️ {m}</div>)}
+                </div>
+              )}
+              {coverageMap.stats && (
+                <div className="coverage-stats">
+                  <span>Összesen: <strong>{coverageMap.stats.total}</strong></span>
+                  <span>Pozitív: <strong>{coverageMap.stats.positive}</strong></span>
+                  <span>Negatív: <strong>{coverageMap.stats.negative}</strong></span>
+                  <span>Boundary: <strong>{coverageMap.stats.boundary}</strong></span>
+                  <span>Lefedettség: <strong style={{color:'var(--green)'}}>{coverageMap.stats.coverage_percent}%</strong></span>
+                </div>
+              )}
+            </div>
+          )}
+
           {result.diffSummary && (
             <div className="diff-summary">
               <h4><i className="ti ti-git-diff" style={{marginRight:'6px'}} />Spec változások</h4>
@@ -845,7 +1045,6 @@ export default function Home() {
                   ['Folder', 'folder'], ['Component', 'component'],
                   ['Labels', 'labels'], ['Owner', 'owner'],
                   ['Test set', 'test_set'],
-                  ['Precondition', 'precondition'],
                   ['Estimated Time', 'estimated_time'],
                   ['Coverage (Issues)', 'coverage_issues']
                 ].map(([label, key]) => (
@@ -854,6 +1053,31 @@ export default function Home() {
                     <input type="text" value={fixedFields[key]} onChange={e => setFixedFields(p => ({...p, [key]: e.target.value}))} placeholder={label} />
                   </div>
                 ))}
+                <div className="field-group" style={{gridColumn:'1/-1'}}>
+                  <label style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    Precondition
+                    <button className="toggle-link" onClick={() => setShowPreconditionBuilder(!showPreconditionBuilder)}>
+                      ✨ AI generálás
+                    </button>
+                  </label>
+                  <input type="text" value={fixedFields.precondition} onChange={e => setFixedFields(p => ({...p, precondition: e.target.value}))} placeholder="Precondition" />
+                  {showPreconditionBuilder && (
+                    <div className="precondition-builder">
+                      <input placeholder="Entitás / kontextus (pl. Physical Unit FIP, ABEPO A67)" value={preconditionInput.entity} onChange={e => setPreconditionInput(p => ({...p, entity: e.target.value}))} />
+                      <input placeholder="Állapot (pl. Created and approved, NOT approved, NULL values)" value={preconditionInput.state} onChange={e => setPreconditionInput(p => ({...p, state: e.target.value}))} />
+                      <select value={preconditionInput.tcType} onChange={e => setPreconditionInput(p => ({...p, tcType: e.target.value}))}>
+                        <option value="positive">Pozitív TC</option>
+                        <option value="negative">Negatív TC</option>
+                      </select>
+                      <div className="form-btns">
+                        <button className="btn-cancel" onClick={() => setShowPreconditionBuilder(false)}>Mégse</button>
+                        <button className="btn-save" onClick={generatePrecondition} disabled={generatingPrecondition}>
+                          {generatingPrecondition ? 'Generálás...' : 'Generálj'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -949,6 +1173,18 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
+            <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'var(--muted)',cursor:'pointer',margin:'.5rem 0'}}>
+              <input type="checkbox" checked={editingTemplate.disableTestData || false}
+                onChange={e => setEditingTemplate(p => ({...p, disableTestData: e.target.checked}))}
+                style={{width:'16px',height:'16px',cursor:'pointer'}} />
+              Test Data tiltása – ne generáljon AI test data-t ehhez a sablonhoz
+            </label>
+            <label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px',color:'var(--muted)',cursor:'pointer',margin:'.5rem 0'}}>
+              <input type="checkbox" checked={editingTemplate.flexibleMode || false}
+                onChange={e => setEditingTemplate(p => ({...p, flexibleMode: e.target.checked}))}
+                style={{width:'16px',height:'16px',cursor:'pointer'}} />
+              Félszabad mód – AI módosíthatja a lépések elvárt eredményeit és részleteit a TC tartalmától függően
+            </label>
             <button className="add-step-btn" onClick={() => setEditingTemplate(p => ({...p, rows: [...p.rows, {action:'',testData:'',expected:''}]}))}>+ Lépés hozzáadása</button>
             <div className="modal-btns" style={{marginTop:'1rem'}}>
               <button className="btn-cancel" onClick={() => setEditingTemplate(null)}>Mégse</button>
